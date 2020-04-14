@@ -49,10 +49,6 @@ def translate():
     #: Set this option to prevent jpeg size error
     gdal.SetConfigOption('GDAL_ALLOW_LARGE_LIBJPEG_MEM_ALLOC', 'YES')
 
-    # tif_path = Path(tif_root)
-    # if not tif_path.exists():
-    #     tif_path.mkdir()
-
     jpgs = sorted(Path(jpeg_root).glob('**/*.jpg'))
 
     for jpg in jpgs:
