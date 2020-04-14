@@ -48,10 +48,12 @@ def translate():
 
     #: Set this option to prevent jpeg size error
     gdal.SetConfigOption('GDAL_ALLOW_LARGE_LIBJPEG_MEM_ALLOC', 'YES')
+    gdal.UseExceptions()
 
     jpgs = sorted(Path(jpeg_root).glob('**/*.jpg'))
 
     counter = 1
+    error_files = []
 
     for jpg in jpgs:
 
@@ -74,14 +76,23 @@ def translate():
             #: Translate .jpg to .tif with gdal.Translate
             creation_opts = ['tiled=yes', 'compress=jpeg', 'photometric=ycbcr',
                              'jpeg_quality=100']
-            trans_opts = gdal.TranslateOptions(format='GTiff',
-                                               creationOptions=creation_opts,
-                                               callback=gdal_progress_callback)
-            dataset = gdal.Translate(str(destination_file),
-                                     str(jpg), options=trans_opts)
-            dataset = None
+            try:
+                trans_opts = gdal.TranslateOptions(format='GTiff',
+                                                creationOptions=creation_opts,
+                                                callback=gdal_progress_callback)
+                dataset = gdal.Translate(str(destination_file),
+                                        str(jpg), options=trans_opts)
+                dataset = None
+            except RuntimeError as e:
+                error_files.append(e)
+                print(e)
 
             counter += 1
+
+    if error_files:
+        print('Failed files:')
+        for e in error_files:
+            print(e)
 
 if __name__ == '__main__':
     translate()
