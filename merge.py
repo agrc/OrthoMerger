@@ -6,12 +6,40 @@
 
 import csv
 import os
+import sys
+
+from pathlib import Path
 
 import numpy as np
 
 from osgeo import gdal
 from osgeo import ogr
 from osgeo import osr
+
+
+#: GDAL callback method that seems to work, as per
+#: https://gis.stackexchange.com/questions/237479/using-callback-with-python-gdal-rasterizelayer
+def gdal_progress_callback(complete, message, unknown):
+    '''
+    Progress bar styled after the default GDAL progress bars. Uses specific
+    signature to conform with GDAL core.
+    '''
+    #: 40 stops on our progress bar, so scale to 40
+    done = int(40 * complete / 1)
+
+    #: Build string: 0...10...20... - done.
+    status = ''
+    for i in range(0, done):
+        if i % 4 == 0:
+            status += str(int(i / 4 * 10))
+        else:
+            status += '.'
+    if done == 40:
+        status += '100 - done.\n'
+
+    sys.stdout.write('\r{}'.format(status))
+    sys.stdout.flush()
+    return 1
 
 
 def ceildiv(first, second):
@@ -515,3 +543,37 @@ if "__main__" in __name__:
             chunk_name = chunk['chunk_rastername']
             chunk_path = os.path.join(tile_dir, chunk_name)
             writer.writerow([chunk_path])
+
+    #: Build list of files for vrt
+    vrt_list = [os.path.join(tile_dir, chunk['chunk_rastername']) for chunk in all_chunks]
+    # vrt_options = gdal.BuildVRTOptions(resampleAlg='cubic')
+
+    #: Build vrt path using Path objects
+    directory_object = Path(directory)
+    vrt_directory = directory_object.parent
+    vrt_name = f'{directory_object.parent.name}{directory_object.name}.vrt'
+    vrt_path = Path(vrt_directory, vrt_name)
+
+    #: Build VRT
+    print(f'\nBuilding vrt {vrt_path}...')
+    vrt = gdal.BuildVRT(str(vrt_path), vrt_list)
+    vrt = None
+
+    creation_opts = ['compress=jpeg', 'photometric=ycbcr', 'tiled=yes']
+
+    tif_name = f'{directory_object.parent.name}{directory_object.name}.tif'
+    tif_path = Path(vrt_directory, tif_name)
+
+    print(f'\nTranslating vrt to {tif_path}...')
+    trans_opts = gdal.TranslateOptions(format='GTiff',
+                                       creationOptions=creation_opts,
+                                       outputType=gdal.GDT_Byte,
+                                       scaleParams=[],
+                                       callback=gdal_progress_callback)
+    dataset = gdal.Translate(str(tif_path), str(vrt_path), options=trans_opts)
+    dataset = None
+
+    print('\nBuilding overviews...')
+    dataset = gdal.Open(str(tif_path), gdal.GA_ReadOnly)
+    dataset.BuildOverviews('NEAREST', [2, 4, 8, 16], gdal_progress_callback)
+    dataset = None
