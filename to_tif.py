@@ -2,6 +2,7 @@
 Utility script to gdal_translate jpgs to tifs
 '''
 
+import datetime
 import re
 import sys
 
@@ -61,8 +62,10 @@ def translate():
     maintaining folder structure.
     '''
 
+    start = datetime.datetime.now()
+
     jpeg_root = r'c:\gis\projects\sanborn\marriott_source_test'
-    tif_root = r'c:\gis\projects\sanborn\marriott_tif_test'
+    tif_root = r'c:\gis\projects\sanborn\marriott_tif_resolution'
 
     year_regex = '[0-9]{4}'
 
@@ -96,18 +99,8 @@ def translate():
 
             print(f'{counter} of {len(jpgs)}: {destination_file}')
 
-            #: Translate .jpg to .tif with gdal.Translate
-            # creation_opts = ['tiled=yes', 'compress=jpeg', 'photometric=ycbcr',
-            #                  'jpeg_quality=100']
             creation_opts = ['tiled=yes', 'compress=lzw']
             try:
-                # trans_opts = gdal.TranslateOptions(format='GTiff',
-                #                                 creationOptions=creation_opts,
-                #                                 callback=gdal_progress_callback)
-                # dataset = gdal.Translate(str(destination_file),
-                #                         str(jpg), options=trans_opts)
-                # dataset = None
-
 
                 #: Manually set source projection based on text of source file's
                 #: projection property.
@@ -126,6 +119,8 @@ def translate():
                                              srcNodata='255 255 255',
                                              dstNodata='256 256 256',
                                              format='GTiff',
+                                             xRes='.08',
+                                             yRes='.08',
                                              outputType=gdal.GDT_Int16,
                                              multithread=True,
                                              creationOptions=creation_opts,
@@ -137,6 +132,9 @@ def translate():
                 # projection_dict[str(jpg)] = projection_text
                 # if projection_text not in projection_list:
                 #     projection_list.append(projection_text)
+
+                # res = get_resolution(str(jpg))
+                # resolution_dict[str(jpg)] = [res[0], res[1], source_crs]
 
             except RuntimeError as e:
                 error_files.append(e)
@@ -154,6 +152,14 @@ def translate():
     # projection_frame.to_csv(csv_path)
     # for p in projection_list:
     #     print(p)
+
+    # resolution_frame = pd.DataFrame.from_dict(resolution_dict, orient='index')
+    # csv_path = Path(tif_root, 'resolutions.csv')
+    # resolution_frame.to_csv(csv_path)
+
+    end = datetime.datetime.now()
+
+    print(f'Runtime: {end-start}')
 
 if __name__ == '__main__':
     translate()
