@@ -1,4 +1,4 @@
-# Copyright maintained from rectified_mosaic.py in
+# Derived from rectified_mosaic.py in
 # https://github.com/cachecounty/general_scripts
 # Copyright (c) 2018 Cache County
 # Copyright (c) 2020 Utah AGRC
@@ -486,14 +486,12 @@ def sort_chunks(cell):
 
 
 if "__main__" in __name__:
-    directory = r'c:\gis\projects\sanborn\springville\tifs'
-    poly_shp = r'c:\gis\projects\sanborn\springville\mosaic.shp'
-    tile_dir = r'c:\gis\projects\sanborn\springville\tiled'
-    csv_path = r'c:\gis\projects\sanborn\springville\mosaic.csv'
-    # directory = r'f:\1978plats'
-    # poly_shp = r'f:\1978plats\00fishnet.shp'
-    # tile_dir = r'f:\1978plats\tiled'
-    fishnet_size = 20
+    directory = r'C:\gis\Projects\Sanborn\marriott_tif_resolution\Murray\1911'
+    poly_shp = r'C:\gis\Projects\Sanborn\marriott_tif_resolution\Murray\mosaic.shp'
+    tile_dir = r'C:\gis\Projects\Sanborn\marriott_tif_resolution\Murray\tiled'
+    csv_path = r'C:\gis\Projects\Sanborn\marriott_tif_resolution\Murray\mosaic.csv'
+
+    fishnet_size = 200
     tile = True
 
     # Retile if needed; otherwise, just read the shapefile
