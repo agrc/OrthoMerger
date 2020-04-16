@@ -517,7 +517,7 @@ def sort_chunks(cell):
 if "__main__" in __name__:
 
     cleanup = False  #: Set to False to keep temp files for troubleshooting
-    fishnet_size = 200  #: in map units
+    fishnet_size = 75  #: in map units
     tile = True  #: Set to False to read data on existing tiles from shapefile
 
     #: Paths
@@ -546,10 +546,11 @@ if "__main__" in __name__:
     if tile_path.exists():
         print(f'Deleting existing tile directory {tile_path}...')
         shutil.rmtree(tile_path)
-    else:
-        tile_path.mkdir(parents=True)
+    tile_path.mkdir(parents=True)
 
-    for file_path in [poly_path, csv_path]:
+    files = [poly_path, csv_path]
+    files.extend([tif for tif in city_dir.glob(f'{tif_name}*')])
+    for file_path in files:
         if file_path.exists():  #: 3.8 will allow unlink(missing_ok=True)
             print(f'Deleting {file_path}...')
             file_path.unlink()
