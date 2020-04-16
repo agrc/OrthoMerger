@@ -521,7 +521,7 @@ if "__main__" in __name__:
     tile = True  #: Set to False to read data on existing tiles from shapefile
 
     #: Paths
-    year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Tooele\1931')
+    year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Sandy\1911')
     output_root_dir = Path(r'F:\WasatchCo\sanborn')
     year = year_dir.name
     city = year_dir.parent.name
@@ -593,8 +593,14 @@ if "__main__" in __name__:
     dataset = None
 
     print('\nBuilding overviews...')
+    #: Set options for compressed overviews
+    gdal.SetConfigOption('compress_overview', 'jpeg')
+    gdal.SetConfigOption('photometric_overview', 'ycbcr')
+    gdal.SetConfigOption('interleave_overview', 'pixel')
+
+    #: Opening read-only creates external overviews (.ovr file)
     dataset = gdal.Open(str(tif_path), gdal.GA_ReadOnly)
-    dataset.BuildOverviews('NEAREST', [2, 4, 8, 16], gdal_progress_callback)
+    dataset.BuildOverviews('cubic', [2, 4, 8, 16], gdal_progress_callback)
     dataset = None
 
     #: Cleanup our files after running
@@ -602,6 +608,6 @@ if "__main__" in __name__:
         for file_path in [poly_path, csv_path, vrt_path]:
             if file_path.exists():
                 file_path.unlink()
-        
+
         if tile_path.exists:
             shutil.rmtree(tile_path)
