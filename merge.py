@@ -537,21 +537,26 @@ if "__main__" in __name__:
     tif_name = f'{city}{year}.tif'
     tif_path = Path(city_dir, tif_name)
 
+    print(f'Merging {year_dir} into {tif_path}')
+
     #: File path management
     if not city_dir.exists():
         city_dir.mkdir(parents=True)
 
     if tile_path.exists():
+        print(f'Deleting existing tile directory {tile_path}...')
         shutil.rmtree(tile_path)
     else:
         tile_path.mkdir(parents=True)
 
     for file_path in [poly_path, csv_path]:
         if file_path.exists():  #: 3.8 will allow unlink(missing_ok=True)
+            print(f'Deleting {file_path}...')
             file_path.unlink()
 
     # Retile if needed; otherwise, just read the shapefile
     if tile:
+        print(f'Tiling source rasters into {tile_path}...')
         all_cells = tile_rectified_rasters(str(year_dir), str(poly_path), str(tile_path), fishnet_size)
     else:
         all_cells = read_chunk_from_shapefile(str(poly_path))
@@ -559,6 +564,7 @@ if "__main__" in __name__:
     #: Create list of sorted dictionaries. The dictionaries for each cell are
     #: flattened and then sorted by distance and then nodatas (first is always
     #: shortest distance, following are sorted by distance then nodatas)
+    print(f'Sorting tiles...')
     all_chunks = []
     for cell_index in all_cells:
         cell_chunks = sort_chunks(all_cells[cell_index])
