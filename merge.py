@@ -7,6 +7,7 @@
 import csv
 import os
 import sys
+import shutil
 
 from pathlib import Path
 
@@ -515,19 +516,37 @@ def sort_chunks(cell):
 
 if "__main__" in __name__:
 
-    year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif_resolution\Murray\1911')
-    city_dir = year_dir.parent
-    poly_path = city_dir/'mosaic.shp'
-    tile_path = city_dir/'tiled'
-    csv_path = city_dir/'mosaic.csv'
+    year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Tooele\1931')
+    output_root_dir = Path(r'F:\WasatchCo\sanborn')
+    year = year_dir.name
+    city = year_dir.parent.name
 
-    fishnet_size = 200
+    city_dir = output_root_dir/city
+    poly_path = city_dir/f'{city}{year}_mosaic.shp'
+    tile_path = city_dir/f'{city}{year}_tiled'
+    csv_path = city_dir/f'{city}{year}_mosaic.csv'
+
+    vrt_name = f'{city}{year}.vrt'
+    vrt_path = Path(city_dir, vrt_name)
+
+    tif_name = f'{city}{year}.tif'
+    tif_path = Path(city_dir, tif_name)
+
+    fishnet_size = 200  #: in map units
     tile = True
 
+    #: File path management
+    if not city_dir.exists():
+        city_dir.mkdir(parents=True)
+
     if tile_path.exists():
-        tile_path.rmdir()
+        shutil.rmtree(tile_path)
     else:
-        tile_path.mkdir()
+        tile_path.mkdir(parents=True)
+
+    for file_path in [poly_path, csv_path]:
+        if file_path.exists():  #: 3.8 will allow unlink(missing_ok=True)
+            file_path.unlink()
 
     # Retile if needed; otherwise, just read the shapefile
     if tile:
@@ -555,19 +574,12 @@ if "__main__" in __name__:
     vrt_list = [str(tile_path/chunk['chunk_rastername']) for chunk in all_chunks]
     # vrt_options = gdal.BuildVRTOptions(resampleAlg='cubic')
 
-    #: Build vrt path using Path objects
-    vrt_name = f'{city_dir.name}{year_dir.name}.vrt'
-    vrt_path = Path(city_dir, vrt_name)
-
     #: Build VRT
     print(f'\nBuilding {vrt_path}...')
     vrt = gdal.BuildVRT(str(vrt_path), vrt_list, callback=gdal_progress_callback)
     vrt = None
 
     creation_opts = ['compress=jpeg', 'photometric=ycbcr', 'tiled=yes']
-
-    tif_name = f'{city_dir.name}{year_dir.name}.tif'
-    tif_path = Path(city_dir, tif_name)
 
     print(f'\nTranslating to {tif_path}...')
     trans_opts = gdal.TranslateOptions(format='GTiff',
