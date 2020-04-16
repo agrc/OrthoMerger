@@ -514,15 +514,11 @@ def sort_chunks(cell):
     return sorted_list
 
 
-if "__main__" in __name__:
-
-    cleanup = False  #: Set to False to keep temp files for troubleshooting
-    fishnet_size = 75  #: in map units
-    tile = True  #: Set to False to read data on existing tiles from shapefile
+def run(source_dir, output_dir, fishnet_size, cleanup=False, tile=True):
 
     #: Paths
-    year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Sandy\1911')
-    output_root_dir = Path(r'F:\WasatchCo\sanborn')
+    year_dir = source_dir
+    output_root_dir = output_dir
     year = year_dir.name
     city = year_dir.parent.name
 
@@ -618,3 +614,16 @@ if "__main__" in __name__:
 
         if tile_path.exists:
             shutil.rmtree(tile_path)
+
+
+if "__main__" in __name__:
+
+    cleanup = False  #: Set to False to keep temp files for troubleshooting
+    fishnet_size = 20  #: in map units
+    tile = True  #: Set to False to read data on existing tiles from shapefile
+
+    #: Paths
+    source_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Sandy\1911')
+    output_dir = Path(r'F:\WasatchCo\sanborn')
+
+    run(source_dir, output_dir, fishnet_size, cleanup, tile)
