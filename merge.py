@@ -514,19 +514,26 @@ def sort_chunks(cell):
 
 
 if "__main__" in __name__:
-    directory = r'C:\gis\Projects\Sanborn\marriott_tif_resolution\Murray\1911'
-    poly_shp = r'C:\gis\Projects\Sanborn\marriott_tif_resolution\Murray\mosaic.shp'
-    tile_dir = r'C:\gis\Projects\Sanborn\marriott_tif_resolution\Murray\tiled'
-    csv_path = r'C:\gis\Projects\Sanborn\marriott_tif_resolution\Murray\mosaic.csv'
+
+    year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif_resolution\Murray\1911')
+    city_dir = year_dir.parent
+    poly_path = city_dir/'mosaic.shp'
+    tile_path = city_dir/'tiled'
+    csv_path = city_dir/'mosaic.csv'
 
     fishnet_size = 200
     tile = True
 
+    if tile_path.exists():
+        tile_path.rmdir()
+    else:
+        tile_path.mkdir()
+
     # Retile if needed; otherwise, just read the shapefile
     if tile:
-        all_cells = tile_rectified_rasters(directory, poly_shp, tile_dir, fishnet_size)
+        all_cells = tile_rectified_rasters(str(year_dir), str(poly_path), str(tile_path), fishnet_size)
     else:
-        all_cells = read_chunk_from_shapefile(poly_shp)
+        all_cells = read_chunk_from_shapefile(str(poly_path))
 
     #: Create list of sorted dictionaries. The dictionaries for each cell are
     #: flattened and then sorted by distance and then nodatas (first is always
@@ -541,30 +548,28 @@ if "__main__" in __name__:
         writer = csv.writer(csv_file)
         for chunk in all_chunks:
             chunk_name = chunk['chunk_rastername']
-            chunk_path = os.path.join(tile_dir, chunk_name)
+            chunk_path = tile_path/chunk_name
             writer.writerow([chunk_path])
 
     #: Build list of files for vrt
-    vrt_list = [os.path.join(tile_dir, chunk['chunk_rastername']) for chunk in all_chunks]
+    vrt_list = [str(tile_path/chunk['chunk_rastername']) for chunk in all_chunks]
     # vrt_options = gdal.BuildVRTOptions(resampleAlg='cubic')
 
     #: Build vrt path using Path objects
-    directory_object = Path(directory)
-    vrt_directory = directory_object.parent
-    vrt_name = f'{directory_object.parent.name}{directory_object.name}.vrt'
-    vrt_path = Path(vrt_directory, vrt_name)
+    vrt_name = f'{city_dir.name}{year_dir.name}.vrt'
+    vrt_path = Path(city_dir, vrt_name)
 
     #: Build VRT
-    print(f'\nBuilding vrt {vrt_path}...')
-    vrt = gdal.BuildVRT(str(vrt_path), vrt_list)
+    print(f'\nBuilding {vrt_path}...')
+    vrt = gdal.BuildVRT(str(vrt_path), vrt_list, callback=gdal_progress_callback)
     vrt = None
 
     creation_opts = ['compress=jpeg', 'photometric=ycbcr', 'tiled=yes']
 
-    tif_name = f'{directory_object.parent.name}{directory_object.name}.tif'
-    tif_path = Path(vrt_directory, tif_name)
+    tif_name = f'{city_dir.name}{year_dir.name}.tif'
+    tif_path = Path(city_dir, tif_name)
 
-    print(f'\nTranslating vrt to {tif_path}...')
+    print(f'\nTranslating to {tif_path}...')
     trans_opts = gdal.TranslateOptions(format='GTiff',
                                        creationOptions=creation_opts,
                                        outputType=gdal.GDT_Byte,
