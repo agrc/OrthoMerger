@@ -5,6 +5,7 @@
 
 
 import csv
+import datetime
 import os
 import sys
 import shutil
@@ -529,10 +530,10 @@ def run(source_dir, output_dir, name, fishnet_size, cleanup=False, tile=True):
     from an external file.
 
     source_dir:         A pathlib.Path object to a directory containing the
-                        rasters to be mosaiced
-    output_dir:         The output directory for the mosaiced tif. Will also
-                        hold the temporary tiled directory, mosaic csv, and
-                        fishnet shapefile.
+                        rasters to be mosaiced.
+    output_dir:         A pathlib.Path object to the output directory for the
+                        mosaiced tif. Will also hold the temporary tiled
+                        directory, mosaic csv, and fishnet shapefile.
     name:               The name for the output raster without any extension
                         (ie, 'foo', not 'foo.tif'). Also used to name the
                         temporary/intermediate data.
@@ -544,6 +545,8 @@ def run(source_dir, output_dir, name, fishnet_size, cleanup=False, tile=True):
                         created earlier.
     '''
 
+    start = datetime.datetime.now()
+
     #: Paths
     poly_path = output_dir/f'{name}_mosaic.shp'
     tile_path = output_dir/f'{name}_tiled'
@@ -552,7 +555,7 @@ def run(source_dir, output_dir, name, fishnet_size, cleanup=False, tile=True):
     tif_path = output_dir/f'{name}.tif'
 
 
-    print(f'Merging {source_dir} into {tif_path}')
+    print(f'\nMerging {source_dir} into {tif_path}\n')
 
     #: File path management
     if not output_dir.exists():
@@ -563,8 +566,11 @@ def run(source_dir, output_dir, name, fishnet_size, cleanup=False, tile=True):
         shutil.rmtree(tile_path)
     tile_path.mkdir(parents=True)
 
-    files = [poly_path, csv_path]
+    files = []
+    #: Add all .tif related files, including .tif.xml and .tif.ovr
     files.extend([tif for tif in output_dir.glob(f'{name}.tif*')])
+    #: Add CSV and all shapefile files
+    files.extend([shp for shp in output_dir.glob(f'{name}_mosaic.*')])
     for file_path in files:
         if file_path.exists():  #: 3.8 will allow unlink(missing_ok=True)
             print(f'Deleting {file_path}...')
@@ -627,12 +633,28 @@ def run(source_dir, output_dir, name, fishnet_size, cleanup=False, tile=True):
 
     #: Cleanup our files after running
     if cleanup:
-        for file_path in [poly_path, csv_path, vrt_path]:
+        print('\nCleaning up after ourselves...\n')
+        if tile_path.exists():
+            print(f'Deleting existing tile directory {tile_path}...')
+            shutil.rmtree(tile_path)
+
+        files = []
+        #: Add CSV and all shapefile files
+        files.extend([shp for shp in output_dir.glob(f'{name}_mosaic.*')])
+        for file_path in files:
+            if file_path.exists():  #: 3.8 will allow unlink(missing_ok=True)
+                print(f'Deleting {file_path}...')
+                file_path.unlink()
+
+        shpfiles_paths = output_dir.glob(f'{poly_path.stem}.*')
+
+        for file_path in [csv_path, vrt_path]:
             if file_path.exists():
                 file_path.unlink()
 
-        if tile_path.exists:
-            shutil.rmtree(tile_path)
+    end = datetime.datetime.now()
+
+    print(f'\n{tif_path} took {end-start} to complete.')
 
 
 if "__main__" in __name__:
@@ -644,11 +666,10 @@ if "__main__" in __name__:
     #: Paths
     year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Sandy\1911')
     output_root_dir = Path(r'F:\WasatchCo\sanborn')
-    city_name = year_dir.parent.name
-    output_dir = output_root_dir/city_name
 
     year = year_dir.name
     city = year_dir.parent.name
+    output_dir = output_root_dir/city
     filename = f'{city}{year}'
 
     run(year_dir, output_dir, filename, fishnet_size, cleanup, tile)
