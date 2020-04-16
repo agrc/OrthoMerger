@@ -51,6 +51,10 @@ def ceildiv(first, second):
 
 
 def get_bounding_box(in_path):
+    '''
+    Gets the extent of a GDAL-supported raster in map units
+    '''
+
     s_fh = gdal.Open(in_path, gdal.GA_ReadOnly)
     trans = s_fh.GetGeoTransform()
     ulx = trans[0]
@@ -115,10 +119,10 @@ def create_polygon(coords):
 
 def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
     '''
-    Given a fishnet of a certain size, copy any chunks of a single source raster
-    into individual files corresponding to the fishnet cells. Calculates
-    the distance from the cell center to the raster's center, and stores in
-    a shapefile containing the bounding box of each cell.
+    Given a fishnet of a certain size, copy any portions of a single source
+    raster into individual tiles with the same extent as the fishnet cells.
+    Calculates the distance from the cell center to the raster's center, and
+    stores in the fishnet shapefile containing the bounding box of each cell.
 
     Returns a nested dictionary containing the distance to center for each sub-chunk
     in the form {cell_name: {'raster':x, 'distance':y, 'nodata found in chunk':z}, ...}
@@ -445,6 +449,10 @@ def tile_rectified_rasters(rectified_dir, shp_path, tiled_dir, fishnet_size):
 
 
 def read_chunk_from_shapefile(shp_path):
+    '''
+    Read the information for each specific cell from the mosaic shapefile.
+    '''
+
     driver = ogr.GetDriverByName('ESRI Shapefile')
     shape_s_dh = driver.Open(shp_path, 0)
     layer = shape_s_dh.GetLayer()
@@ -515,7 +523,11 @@ def sort_chunks(cell):
 
 
 def run(source_dir, output_dir, fishnet_size, cleanup=False, tile=True):
-
+    '''
+    Main logic; (eventually) all calls to other functions will come from this
+    function. Designed to either manually call with arguments or to be called
+    from an external file.
+    '''
     #: Paths
     year_dir = source_dir
     output_root_dir = output_dir
