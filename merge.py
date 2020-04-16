@@ -516,6 +516,11 @@ def sort_chunks(cell):
 
 if "__main__" in __name__:
 
+    cleanup = False  #: Set to False to keep temp files for troubleshooting
+    fishnet_size = 200  #: in map units
+    tile = True  #: Set to False to read data on existing tiles from shapefile
+
+    #: Paths
     year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Tooele\1931')
     output_root_dir = Path(r'F:\WasatchCo\sanborn')
     year = year_dir.name
@@ -531,9 +536,6 @@ if "__main__" in __name__:
 
     tif_name = f'{city}{year}.tif'
     tif_path = Path(city_dir, tif_name)
-
-    fishnet_size = 200  #: in map units
-    tile = True
 
     #: File path management
     if not city_dir.exists():
@@ -594,3 +596,12 @@ if "__main__" in __name__:
     dataset = gdal.Open(str(tif_path), gdal.GA_ReadOnly)
     dataset.BuildOverviews('NEAREST', [2, 4, 8, 16], gdal_progress_callback)
     dataset = None
+
+    #: Cleanup our files after running
+    if cleanup:
+        for file_path in [poly_path, csv_path, vrt_path]:
+            if file_path.exists():
+                file_path.unlink()
+        
+        if tile_path.exists:
+            shutil.rmtree(tile_path)
