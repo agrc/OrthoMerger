@@ -522,34 +522,41 @@ def sort_chunks(cell):
     return sorted_list
 
 
-def run(source_dir, output_dir, fishnet_size, cleanup=False, tile=True):
+def run(source_dir, output_dir, name, fishnet_size, cleanup=False, tile=True):
     '''
     Main logic; (eventually) all calls to other functions will come from this
     function. Designed to either manually call with arguments or to be called
     from an external file.
+
+    source_dir:         A pathlib.Path object to a directory containing the
+                        rasters to be mosaiced
+    output_dir:         The output directory for the mosaiced tif. Will also
+                        hold the temporary tiled directory, mosaic csv, and
+                        fishnet shapefile.
+    name:               The name for the output raster without any extension
+                        (ie, 'foo', not 'foo.tif'). Also used to name the
+                        temporary/intermediate data.
+    fishnet_size:       The size for each cell in map units.
+    cleanup:            If true, delete all temporary/intermediate data.
+    tile:               If true, source rasters will be tiled into a temporary
+                        directory within output_dir. If false, info required
+                        for sorting will be read from the fishnet shapefile
+                        created earlier.
     '''
+
     #: Paths
-    year_dir = source_dir
-    output_root_dir = output_dir
-    year = year_dir.name
-    city = year_dir.parent.name
+    poly_path = output_dir/f'{name}_mosaic.shp'
+    tile_path = output_dir/f'{name}_tiled'
+    csv_path = output_dir/f'{name}_mosaic.csv'
+    vrt_path = output_dir/f'{name}.vrt'
+    tif_path = output_dir/f'{name}.tif'
 
-    city_dir = output_root_dir/city
-    poly_path = city_dir/f'{city}{year}_mosaic.shp'
-    tile_path = city_dir/f'{city}{year}_tiled'
-    csv_path = city_dir/f'{city}{year}_mosaic.csv'
 
-    vrt_name = f'{city}{year}.vrt'
-    vrt_path = Path(city_dir, vrt_name)
-
-    tif_name = f'{city}{year}.tif'
-    tif_path = Path(city_dir, tif_name)
-
-    print(f'Merging {year_dir} into {tif_path}')
+    print(f'Merging {source_dir} into {tif_path}')
 
     #: File path management
-    if not city_dir.exists():
-        city_dir.mkdir(parents=True)
+    if not output_dir.exists():
+        output_dir.mkdir(parents=True)
 
     if tile_path.exists():
         print(f'Deleting existing tile directory {tile_path}...')
@@ -557,7 +564,7 @@ def run(source_dir, output_dir, fishnet_size, cleanup=False, tile=True):
     tile_path.mkdir(parents=True)
 
     files = [poly_path, csv_path]
-    files.extend([tif for tif in city_dir.glob(f'{tif_name}*')])
+    files.extend([tif for tif in output_dir.glob(f'{name}.tif*')])
     for file_path in files:
         if file_path.exists():  #: 3.8 will allow unlink(missing_ok=True)
             print(f'Deleting {file_path}...')
@@ -566,7 +573,7 @@ def run(source_dir, output_dir, fishnet_size, cleanup=False, tile=True):
     # Retile if needed; otherwise, just read the shapefile
     if tile:
         print(f'Tiling source rasters into {tile_path}...')
-        all_cells = tile_rectified_rasters(str(year_dir), str(poly_path), str(tile_path), fishnet_size)
+        all_cells = tile_rectified_rasters(str(source_dir), str(poly_path), str(tile_path), fishnet_size)
     else:
         all_cells = read_chunk_from_shapefile(str(poly_path))
 
@@ -635,7 +642,13 @@ if "__main__" in __name__:
     tile = True  #: Set to False to read data on existing tiles from shapefile
 
     #: Paths
-    source_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Sandy\1911')
-    output_dir = Path(r'F:\WasatchCo\sanborn')
+    year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Sandy\1911')
+    output_root_dir = Path(r'F:\WasatchCo\sanborn')
+    city_name = year_dir.parent.name
+    output_dir = output_root_dir/city_name
 
-    run(source_dir, output_dir, fishnet_size, cleanup, tile)
+    year = year_dir.name
+    city = year_dir.parent.name
+    filename = f'{city}{year}'
+
+    run(year_dir, output_dir, filename, fishnet_size, cleanup, tile)
