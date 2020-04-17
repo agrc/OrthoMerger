@@ -67,7 +67,7 @@ def translate():
     jpeg_root = r'c:\gis\projects\sanborn\marriott_source'
     tif_root = r'c:\gis\projects\sanborn\marriott_tif'
 
-    year_regex = '[0-9]{4}'
+    year_regex = '\d{4}$'
 
     #: Set this option to prevent jpeg size error
     gdal.SetConfigOption('GDAL_ALLOW_LARGE_LIBJPEG_MEM_ALLOC', 'YES')
