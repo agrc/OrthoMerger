@@ -302,7 +302,7 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
 
             new_num_nodata = num_nodata / 3.
 
-            print("{}, {}, {}, {}".format(cell_name, rastername, distance, new_num_nodata))
+            # print("{}, {}, {}, {}".format(cell_name, rastername, distance, new_num_nodata))
 
             # Create cell bounding boxes as shapefile, with distance from the
             # middle of the cell to the middle of it's parent raster saved as a
@@ -414,11 +414,19 @@ def tile_rectified_rasters(rectified_dir, shp_path, tiled_dir, fishnet_size):
     # dictionary containing info about every new raster tile
     all_cells = {}
 
+    counter = 0
+
     # Loop through rectified rasters, create tiles named by index
     for root, dirs, files in os.walk(rectified_dir):
+        total = len(files)
         for fname in files:
             if fname[-4:] == ".tif":
                 #print(fname)
+
+                #: Raster progress bar
+                counter +=1
+                percent = counter/total
+                gdal_progress_callback(percent, None, None)
 
                 distances = copy_tiles_from_raster(root, fname, fishnet, layer,
                                                    tiled_dir)
@@ -578,15 +586,18 @@ def run(source_dir, output_dir, name, fishnet_size, cleanup=False, tile=True):
 
     # Retile if needed; otherwise, just read the shapefile
     if tile:
-        print(f'Tiling source rasters into {tile_path}...')
+        print(f'\nTiling source rasters into {tile_path}...')
         all_cells = tile_rectified_rasters(str(source_dir), str(poly_path), str(tile_path), fishnet_size)
     else:
         all_cells = read_chunk_from_shapefile(str(poly_path))
 
+    #: Extra print for end of progbar
+    # print('')
+
     #: Create list of sorted dictionaries. The dictionaries for each cell are
     #: flattened and then sorted by distance and then nodatas (first is always
     #: shortest distance, following are sorted by distance then nodatas)
-    print(f'Sorting tiles...')
+    print(f'\nSorting tiles...')
     all_chunks = []
     for cell_index in all_cells:
         cell_chunks = sort_chunks(all_cells[cell_index])
