@@ -3,6 +3,14 @@
 # Copyright (c) 2018 Cache County
 # Copyright (c) 2020 Utah AGRC
 
+#: Verbiage
+#: Cell:    The entire area covered by the all the rasters is divided into
+#:          equal-sized cells based on fishnet_size. Cells are the individual
+#:          units of the fishnet.
+#: Tile:    A tile is the piece of a source raster that covers some or all of
+#:          the area defined by a cell. There may be multiple tiles per cell.
+#:          Choosing the right tile to be "on top" of the output raster is the
+#:          main logical task of the program.
 
 import csv
 import datetime
@@ -76,32 +84,32 @@ def create_fishnet_indices(ulx, uly, lrx, lry, dimension, pixels=False, pixel_si
     If pixels is true, assumes dimensions are in pixels and uses pixel_size.
     Otherwise, dimension is in raster coordinate system.
 
-    Returns:    list of tuples (x fishnet index, y fishnet index, chunk ulx,
-                chunk uly, chunk lrx, chunk lry)
+    Returns:    list of tuples (x fishnet index, y fishnet index, cell ulx,
+                cell uly, cell lrx, cell lry)
     '''
 
-    chunks = []
+    cells = []
 
     ref_width = lrx - ulx
     ref_height = uly - lry
     if pixels:
-        chunk_ref_size = dimension * pixel_size
+        cell_ref_size = dimension * pixel_size
     else:
-        chunk_ref_size = dimension
-    num_x_chunks = int(ceildiv(ref_width, chunk_ref_size))
-    num_y_chunks = int(ceildiv(ref_height, chunk_ref_size))
-    for y_chunk in range(0, num_y_chunks):
-        for x_chunk in range(0, num_x_chunks):
-            x_index = x_chunk
-            y_index = y_chunk
-            chunk_ulx = ulx + (chunk_ref_size * x_index)
-            chunk_uly = uly + (-chunk_ref_size * y_index)
-            chunk_lrx = ulx + (chunk_ref_size * (x_index + 1))
-            chunk_lry = uly + (-chunk_ref_size * (y_index + 1))
-            chunks.append((x_index, y_index, chunk_ulx, chunk_uly, chunk_lrx,
-                           chunk_lry))
+        cell_ref_size = dimension
+    num_x_cells = int(ceildiv(ref_width, cell_ref_size))
+    num_y_cells = int(ceildiv(ref_height, cell_ref_size))
+    for y_cell in range(0, num_y_cells):
+        for x_cell in range(0, num_x_cells):
+            x_index = x_cell
+            y_index = y_cell
+            cell_ulx = ulx + (cell_ref_size * x_index)
+            cell_uly = uly + (-cell_ref_size * y_index)
+            cell_lrx = ulx + (cell_ref_size * (x_index + 1))
+            cell_lry = uly + (-cell_ref_size * (y_index + 1))
+            cells.append((x_index, y_index, cell_ulx, cell_uly, cell_lrx,
+                           cell_lry))
 
-    return chunks
+    return cells
 
 
 def create_polygon(coords):
@@ -125,8 +133,8 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
     Calculates the distance from the cell center to the raster's center, and
     stores in the fishnet shapefile containing the bounding box of each cell.
 
-    Returns a nested dictionary containing the distance to center for each sub-chunk
-    in the form {cell_name: {'raster':x, 'distance':y, 'nodata found in chunk':z}, ...}
+    Returns a nested dictionary containing the distance to center for each tile
+    in the form {cell_name: {'raster':x, 'distance':y, 'nodata found in tile':z}, ...}
     '''
 
     distances = {}
@@ -675,8 +683,8 @@ if "__main__" in __name__:
     tile = True  #: Set to False to read data on existing tiles from shapefile
 
     #: Paths
-    year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Sandy\1911')
-    output_root_dir = Path(r'F:\WasatchCo\sanborn')
+    year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Logan\1930')
+    output_root_dir = Path(r'F:\WasatchCo\sanborn_edgedistance')
 
     year = year_dir.name
     city = year_dir.parent.name
