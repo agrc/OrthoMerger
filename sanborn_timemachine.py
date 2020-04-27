@@ -2,6 +2,9 @@
 Explore Sanborn data delivered in a directory structure of root/city/year
 (the rasters should have been reprojected and translated to tif previously).
 '''
+
+import datetime
+
 from pathlib import Path
 
 import merge
@@ -13,6 +16,10 @@ def time_travel(main_dir_path, output_path):
     vintages one at a time to merge.run() to build a single mosaiced tif of
     that vintage.
     '''
+
+    start = datetime.datetime.now()
+    problems = []
+    problem_years = []
 
     year_regex = '\d{4}$'
 
@@ -32,7 +39,19 @@ def time_travel(main_dir_path, output_path):
         filename_root = f'{city}{year}'
         output_dir = Path(output_path, city)
 
-        merge.run(year_dir, output_dir, filename_root, fishnet_size=20, cleanup=False, tile=True)
+        try:
+            merge.run(year_dir, output_dir, filename_root, fishnet_size=10, cleanup=False, tile=True)
+        except Exception as e:
+            problems.append(e)
+            problem_years.append(f'{city}{year}')
+
+    if problem_years:
+        print(problems)
+        print(problem_years)
+
+    end = datetime.datetime.now()
+    print(f'\nTotal run time: {end-start}')
+
 
 if __name__ == '__main__':
     source = r'C:\gis\Projects\Sanborn\marriott_tif'
