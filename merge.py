@@ -203,7 +203,7 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
 
             #print("{} {} {} {}".format(x_off, y_off, x_size, y_size))
 
-            # Values for ReadAsArray, these aren't changed later unelss
+            # Values for ReadAsArray, these aren't changed later unless
             # the border case checks change them
             # These are all in pixels
             # We are adding two to read_x/y_size to slightly overread to
