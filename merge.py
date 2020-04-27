@@ -59,6 +59,26 @@ def ceildiv(first, second):
     return -(-first // second)
 
 
+def shortest_distance(pointx, pointy, xmin, xmax, ymin, ymax):
+    '''
+    Determine which dimension has the shortest distance to its edge
+    '''
+
+    distances = []
+
+    distances.append({'name': 'xmax', 'distance': abs(xmax-pointx)})
+    distances.append({'name': 'xmin', 'distance': abs(xmin-pointx)})
+    distances.append({'name': 'ymax', 'distance': abs(ymax-pointy)})
+    distances.append({'name': 'ymin', 'distance': abs(ymin-pointy)})
+
+    #: Sort distances based on shortest absolute distance to edge
+    distances.sort(key=lambda distance: distance['distance'])
+
+    #: Just return the first (smallest) distance, which is the closest distance
+    #: to any edge
+    return distances[0]
+
+
 def get_bounding_box(in_path):
     '''
     Gets the extent of a GDAL-supported raster in map units
@@ -171,6 +191,7 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
     # raster to new subchunks.
     for cell in fishnet:
 
+        #: cell x/y min/max in map units
         cell_name = "{}-{}".format(cell[0], cell[1])
         cell_xmin = cell[2]
         cell_xmax = cell[4]
@@ -303,7 +324,7 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
             # Close target file handle
             t_fh = None
 
-            # Calculate distance from cell center to raster center
+            # Calculate distance from cell center to raster center in map units
             cell_center = np.array((cell_xmid, cell_ymid))
             raster_center = np.array((raster_xmid, raster_ymid))
             distance = np.linalg.norm(cell_center - raster_center)
@@ -518,7 +539,7 @@ def sort_chunks(cell):
     '''
 
     #: First, convert nested dictionary to list of dictionaries while inserting
-    #: chunk_rastername as a value of the dictionary
+    #: chunk_rastername (original key) as a value of the dictionary
     chunk_list = []
     for chunk_rastername in cell:
         chunk_list.append({'chunk_rastername': chunk_rastername,
@@ -526,7 +547,7 @@ def sort_chunks(cell):
                            'nodatas':cell[chunk_rastername]['nodatas']
                            })
 
-    #: sort the list of chunks based on distance
+    #: sort the list of chunks based on distance- smallest distance value first
     chunk_list.sort(key=lambda chunk_dict: chunk_dict['distance'])
 
     #: Separate out the best chunk, sort remaining by nodatas
