@@ -59,9 +59,10 @@ def ceildiv(first, second):
     return -(-first // second)
 
 
-def shortest_distance(pointx, pointy, xmin, xmax, ymin, ymax):
+def shortest_dimension_distance(pointx, pointy, xmin, xmax, ymin, ymax):
     '''
-    Determine which dimension has the shortest distance to its edge
+    Determine which dimension has the shortest distance between its edge and
+    the given point
     '''
 
     distances = []
@@ -325,9 +326,13 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
             t_fh = None
 
             # Calculate distance from cell center to raster center in map units
-            cell_center = np.array((cell_xmid, cell_ymid))
-            raster_center = np.array((raster_xmid, raster_ymid))
-            distance = np.linalg.norm(cell_center - raster_center)
+            # cell_center = np.array((cell_xmid, cell_ymid))
+            # raster_center = np.array((raster_xmid, raster_ymid))
+            # distance = np.linalg.norm(cell_center - raster_center)
+            distance_dict = shortest_dimension_distance(cell_xmid, cell_ymid,
+                                                        raster_xmin, raster_xmax,
+                                                        raster_ymin, raster_ymax)
+            distance = distance_dict['distance']
 
             new_num_nodata = num_nodata / 3.
 
@@ -547,8 +552,9 @@ def sort_chunks(cell):
                            'nodatas':cell[chunk_rastername]['nodatas']
                            })
 
-    #: sort the list of chunks based on distance- smallest distance value first
-    chunk_list.sort(key=lambda chunk_dict: chunk_dict['distance'])
+    # # : sort the list of chunks based on distance- smallest distance value first
+    #: sort the list of chunks based on distance from edge - largest distance first
+    chunk_list.sort(key=lambda chunk_dict: chunk_dict['distance'], reverse=True)
 
     #: Separate out the best chunk, sort remaining by nodatas
     sorted_list = chunk_list[:1]
@@ -700,7 +706,7 @@ def run(source_dir, output_dir, name, fishnet_size, cleanup=False, tile=True):
 if "__main__" in __name__:
 
     cleanup = False  #: Set to False to keep temp files for troubleshooting
-    fishnet_size = 20  #: in map units
+    fishnet_size = 10  #: in map units
     tile = True  #: Set to False to read data on existing tiles from shapefile
 
     #: Paths
