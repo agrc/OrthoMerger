@@ -14,6 +14,7 @@
 
 import csv
 import datetime
+import math
 import os
 import sys
 import shutil
@@ -304,9 +305,46 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
             t_fh = None
 
             # Calculate distance from cell center to raster center
+            #: tile closest to raster center is most desirable.
             cell_center = np.array((cell_xmid, cell_ymid))
             raster_center = np.array((raster_xmid, raster_ymid))
-            distance = np.linalg.norm(cell_center - raster_center)
+            point_distance = np.linalg.norm(cell_center - raster_center)
+
+            #: Angle from source raster center to cell raster center, assuming
+            #: raster center is the origin of a mathematical azimuth
+            #: (0=east, ccw) and all x/y coords are positive (most projected
+            #: coordinate systems)
+            azrad = math.atan2(cell_ymid-raster_ymid, cell_xmid-raster_xmid)
+            delta_x = math.cos(azrad)
+            delta_y = -1. * math.sin(azrad)
+
+            #: Walk away from the cell center point along the line starting at
+            #: the raster center point and continuing through the cell center in
+            #: steps of 5 (5m, assuming UTM- should parameterize this)
+            #: We need to check if this is being done multiple times per
+            #: cell/raster combo.
+            spacing = 5
+            walk = True
+            next_x = cell_xmid
+            next_y = cell_ymid
+            while walk:
+                next_x += delta_x * spacing
+                next_y += delta_y * spacing
+                # Check to see if next point is outside source raster
+                x_outside = next_x < raster_xmin or next_x > raster_xmax
+                y_outside = next_y < raster_ymin or next_y > raster_ymax
+                if x_outside or y_outside:
+                    walk = False
+                    raster_edge = np.array((next_x, next_y))
+
+            edge_distance = np.linalg.norm(raster_edge - raster_center)
+
+            percent_distance = 100 * point_distance / edge_distance
+
+            #: Sorting method assumes the small distance in the distances dict
+            #: is the most desirable; thus, we need to make sure this is number
+            #: small for cells closest to the raster center
+            distance = percent_distance
 
             new_num_nodata = num_nodata / 3.
 
@@ -679,12 +717,12 @@ def run(source_dir, output_dir, name, fishnet_size, cleanup=False, tile=True):
 if "__main__" in __name__:
 
     cleanup = False  #: Set to False to keep temp files for troubleshooting
-    fishnet_size = 20  #: in map units
+    fishnet_size = 10  #: in map units
     tile = True  #: Set to False to read data on existing tiles from shapefile
 
     #: Paths
     year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Logan\1930')
-    output_root_dir = Path(r'F:\WasatchCo\sanborn_edgedistance')
+    output_root_dir = Path(r'F:\WasatchCo\sanborn_percentdistance')
 
     year = year_dir.name
     city = year_dir.parent.name
