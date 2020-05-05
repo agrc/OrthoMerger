@@ -579,36 +579,39 @@ def read_tiles_from_shapefile(shp_path):
     return cells
 
 
-def sort_chunks(cell):
+def sort_tiles(cell):
     '''
-    Sort the source raster chunks in a cell based on distance to center then
-    # of nodatas.
-    'cell' is a nested dictionary thus:
-       {chunk_rastername: {'distance': distance,
-                           'nodatas': nodatas},
-        ...,
-        }
+    Sort the source raster tiles in a single cell based on distance to center
+    then # of nodatas, overriding where indicated.
+    'cell' is a nested dictionary, the inner dictionaries of the master cells
+    dictionary, and is formatted thus:
+    {tile_rastername:
+        {'distance':x,
+         'nodatas':y,
+         'override':True/False}
+    }
 
-    returns a list of sorted chunks, with the outer key (chunk_rastername)
+    returns a list of sorted tiles, with the outer key (tile_rastername)
     being added to the inner dictionary as a value with the same name (so
-    there's now a list of dicts, rather than a nested dict)
+    there's now a list of dicts, rather than a nested dict):
+    [{'tile_rastername':x, 'distance':y, 'nodatas':z}, {...}, ...]
     '''
 
     #: First, convert nested dictionary to list of dictionaries while inserting
-    #: chunk_rastername as a value of the dictionary
-    chunk_list = []
-    for chunk_rastername in cell:
-        chunk_list.append({'chunk_rastername': chunk_rastername,
-                           'distance': cell[chunk_rastername]['distance'],
-                           'nodatas':cell[chunk_rastername]['nodatas']
+    #: tile_rastername as a value of the dictionary
+    tile_list = []
+    for tile_rastername in cell:
+        tile_list.append({'tile_rastername': tile_rastername,
+                           'distance': cell[tile_rastername]['distance'],
+                           'nodatas':cell[tile_rastername]['nodatas']
                            })
 
     #: sort the list of chunks based on distance
-    chunk_list.sort(key=lambda chunk_dict: chunk_dict['distance'])
+    tile_list.sort(key=lambda chunk_dict: chunk_dict['distance'])
 
     #: Separate out the best chunk, sort remaining by nodatas
-    sorted_list = chunk_list[:1]
-    seconds_list = chunk_list[1:]
+    sorted_list = tile_list[:1]
+    seconds_list = tile_list[1:]
     seconds_list.sort(key=lambda chunk_dict: chunk_dict['nodatas'])
 
     sorted_list.extend(seconds_list)
@@ -685,21 +688,21 @@ def run(source_dir, output_dir, name, fishnet_size, cleanup=False, tile=True):
     #: flattened and then sorted by distance and then nodatas (first is always
     #: shortest distance, following are sorted by distance then nodatas)
     print(f'\nSorting tiles...')
-    all_chunks = []
+    sorted_tiles = []
     for cell_index in all_cells:
-        cell_chunks = sort_chunks(all_cells[cell_index])
-        cell_chunks.reverse()  #: reverse so VRT adds most desirable chunks last
-        all_chunks.extend(cell_chunks)
+        cell_tiles = sort_tiles(all_cells[cell_index])
+        cell_tiles.reverse()  #: reverse so VRT adds most desirable chunks last
+        sorted_tiles.extend(cell_tiles)
 
     with open(csv_path, 'w', newline='') as csv_file:
         writer = csv.writer(csv_file)
-        for chunk in all_chunks:
-            chunk_name = chunk['chunk_rastername']
-            chunk_path = tile_path/chunk_name
-            writer.writerow([chunk_path])
+        for tile in sorted_tiles:
+            tile_name = tile['tile_rastername']
+            full_tile_path = tile_path/tile_name
+            writer.writerow([full_tile_path])
 
     #: Build list of files for vrt
-    vrt_list = [str(tile_path/chunk['chunk_rastername']) for chunk in all_chunks]
+    vrt_list = [str(tile_path/tile['tile_rastername']) for tile in sorted_tiles]
     # vrt_options = gdal.BuildVRTOptions(resampleAlg='cubic')
 
     #: Build VRT
