@@ -134,11 +134,18 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
     Calculates the distance from the cell center to the raster's center, and
     stores in the fishnet shapefile containing the bounding box of each cell.
 
-    Returns a nested dictionary containing the distance to center for each tile
-    in the form {cell_name: {'raster':x, 'distance':y, 'nodata found in tile':z}, ...}
+    Returns a double nested dictionary containing the information for each tile
+    in the form:
+    {cell_index:
+        {tile_rastername:
+            {'distance':x,
+             'nodatas':y,
+             'override':True/False}
+        }
+    }
     '''
 
-    distances = {}
+    cells = {}
 
     raster_path = os.path.join(root, rastername)
 
@@ -172,7 +179,7 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
     # raster to new subchunks.
     for cell in fishnet:
 
-        cell_name = "{}-{}".format(cell[0], cell[1])
+        cell_index = "{}-{}".format(cell[0], cell[1])
         cell_xmin = cell[2]
         cell_xmax = cell[4]
         cell_ymin = cell[5]
@@ -247,9 +254,9 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
                 sa_y_end = read_y_size
 
             # Set up output raster
-            t_rastername = "{}_{}.tif".format(cell_name, rastername[:-4])
-            #print(t_rastername)
-            t_path = os.path.join(target_dir, t_rastername)
+            tile_rastername = "{}_{}.tif".format(cell_index, rastername[:-4])
+            #print(tile_rastername)
+            t_path = os.path.join(target_dir, tile_rastername)
             t_fh = driver.Create(t_path, x_size, y_size, bands, gdal.GDT_Int16, options=lzw_opts)
             t_fh.SetProjection(projection)
 
@@ -311,7 +318,7 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
 
             new_num_nodata = num_nodata / 3.
 
-            # print("{}, {}, {}, {}".format(cell_name, rastername, distance, new_num_nodata))
+            # print("{}, {}, {}, {}".format(cell_index, rastername, distance, new_num_nodata))
 
             # Create cell bounding boxes as shapefile, with distance from the
             # middle of the cell to the middle of it's parent raster saved as a
@@ -324,7 +331,7 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
             defn = shp_layer.GetLayerDefn()
             feature = ogr.Feature(defn)
             feature.SetField('raster', rastername)
-            feature.SetField('cell', cell_name)
+            feature.SetField('cell', cell_index)
             feature.SetField('d_to_cent', distance)
             feature.SetField('nodatas', new_num_nodata)
             poly = create_polygon(coords)
@@ -343,14 +350,15 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
             #: a list of nested dicts rather than a double-nested dict (still
             #: need some sort of separation so that sorting occurs at a cell-
             #: level)
-            if cell_name not in distances:
-                distances[cell_name] = {}
-            distances[cell_name][t_rastername] = {'distance': distance,
-                                                  'nodatas': new_num_nodata
+            if cell_index not in cells:
+                cells[cell_index] = {}
+            cells[cell_index][tile_rastername] = {'distance': distance,
+                                                  'nodatas': new_num_nodata,
+                                                  'override': False
                                                  }
 
             # tile_key = t_rastername[:-4]
-            # distances[tile_key] = {'index': cell_name,
+            # distances[tile_key] = {'index': cell_index,
             #                        'raster': rastername,
             #                        'distance': distance,
             #                        'nodatas': new_num_nodata,
@@ -360,10 +368,10 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
     # close source raster
     s_fh = None
 
-    return distances
+    return cells
 
 
-def tile_rectified_rasters(rectified_dir, extents_path, shp_path, tiled_dir, fishnet_size):
+def generate_tiles_from_rasters(rectified_dir, extents_path, shp_path, tiled_dir, fishnet_size):
     '''
     Tiles all the rasters in rectified_dir into tiles based on a fishnet
     starting at the upper left of all the rasters and that has cells of
@@ -374,8 +382,16 @@ def tile_rectified_rasters(rectified_dir, extents_path, shp_path, tiled_dir, fis
     cell index, the distance from the center of the tile to the center of the
     parent raster, and the number of nodata pixels in the tile.
 
-    Returns: A list of dictionaries containing the tile information like so:
-    [{cell_index: (rastername, distance, nodatas)}, {}, ...]
+    Returns: A double-nested dictionary built from similarly-formated
+    dictionaries from copy_tiles_from_raster() containing all the information
+    about each cell, formatted like thus:
+    {cell_index:
+        {tile_rastername:
+            {'distance':x,
+             'nodatas':y,
+             'override':True/False}
+        }
+    }
     '''
 
     #: {filename:[(xmin, ymax),
@@ -461,8 +477,9 @@ def tile_rectified_rasters(rectified_dir, extents_path, shp_path, tiled_dir, fis
     layer.CreateField(ogr.FieldDefn('cell', ogr.OFTString))
     layer.CreateField(ogr.FieldDefn('d_to_cent', ogr.OFTReal))
     layer.CreateField(ogr.FieldDefn('nodatas', ogr.OFTReal))
+    layer.CreateField(ogr.FieldDefn('override', ogr.OFTString))
 
-    # dictionary containing info about every new raster tile
+    #: Master dictionary containing info about every cell in our extent
     all_cells = {}
 
     counter = 0
@@ -479,14 +496,18 @@ def tile_rectified_rasters(rectified_dir, extents_path, shp_path, tiled_dir, fis
                 percent = counter/total
                 gdal_progress_callback(percent, None, None)
 
-                distances = copy_tiles_from_raster(root, fname, fishnet, layer,
-                                                   tiled_dir)
+                raster_cells = copy_tiles_from_raster(root, fname, fishnet, layer,
+                                                      tiled_dir)
 
-                for cell_index in distances:
+                #: Merge raster's cells dictionary into master cells dictionary
+                for cell_index in raster_cells:
+                    #: If this cell index already exists, add the raster's tiles
+                    #: by extending the dictionary
                     if cell_index in all_cells:
-                        all_cells[cell_index].update(distances[cell_index])
+                        all_cells[cell_index].update(raster_cells[cell_index])
+                    #: Otherwise, this raster has the first tiles for that cell
                     else:
-                        all_cells[cell_index] = distances[cell_index]
+                        all_cells[cell_index] = raster_cells[cell_index]
 
                 # all_cells.update(distances)
 
@@ -508,37 +529,50 @@ def tile_rectified_rasters(rectified_dir, extents_path, shp_path, tiled_dir, fis
     return all_cells
 
 
-def read_chunk_from_shapefile(shp_path):
+def read_tiles_from_shapefile(shp_path):
     '''
     Read the information for each specific cell from the mosaic shapefile.
+
+    Returns: A double-nested dictionary read from the shapefile's features
+    containing all the information about each cell, formatted like thus:
+    {cell_index:
+        {tile_rastername:
+            {'distance':x,
+             'nodatas':y,
+             'override':True/False}
+        }
+    }
     '''
 
     driver = ogr.GetDriverByName('ESRI Shapefile')
     shape_s_dh = driver.Open(shp_path, 0)
     layer = shape_s_dh.GetLayer()
 
-    #{cell_index: {rastername:x, distance:x, nodatas:x}, ...}
+    #{cell_index: {rastername: {distance:x, nodatas:x, override:x}}}
     cells = {}
+    #: Ever feature is a tile (identified by tile_rastername)
     for feature in layer:
         cell_index = feature.GetField("cell")
         rastername = feature.GetField("raster")
         distance = feature.GetField("d_to_cent")
         nodatas = feature.GetField("nodatas")
-        chunk_rastername = "{}_{}.tif".format(cell_index, rastername[:-4])
+        override_text = feature.GetField("override")
+        override = False
+        if override_text.casefold() == 'y':
+            override = True
+        tile_rastername = "{}_{}.tif".format(cell_index, rastername[:-4])
 
+        tile_dict = {'distance': distance,
+                     'nodatas': nodatas,
+                     'override': override}
+
+        #: If the cell already exists, add tile dictionary to that cell's dict
         if cell_index in cells:
-            cells[cell_index][chunk_rastername] = {'distance': distance,
-                                                   'nodatas': nodatas
-                                                  }
+            cells[cell_index][tile_rastername] = tile_dict
+        #: Otherwise, create new sub-dict for that cell and add tile dictionary
+        else:
+            cells[cell_index] = {tile_rastername: tile_dict}
 
-        # tile_key = f'{cell_index}_{rastername[:-4]}'
-        # cells[tile_key] = {'index': cell_index,
-        #                    'raster': rastername,
-        #                    'distance': distance,
-        #                    'nodatas': nodatas,
-        #                    'tile': tile_key
-        #                    }
-        # cells.append(celldict)
     layer = None
     shape_s_dh = None
 
@@ -640,9 +674,9 @@ def run(source_dir, output_dir, name, fishnet_size, cleanup=False, tile=True):
     # Retile if needed; otherwise, just read the shapefile
     if tile:
         print(f'\nTiling source rasters into {tile_path}...')
-        all_cells = tile_rectified_rasters(str(source_dir), str(extents_path), str(poly_path), str(tile_path), fishnet_size)
+        all_cells = generate_tiles_from_rasters(str(source_dir), str(extents_path), str(poly_path), str(tile_path), fishnet_size)
     else:
-        all_cells = read_chunk_from_shapefile(str(poly_path))
+        all_cells = read_tiles_from_shapefile(str(poly_path))
 
     #: Extra print for end of progbar
     # print('')
