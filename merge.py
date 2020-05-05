@@ -594,7 +594,7 @@ def sort_tiles(cell):
     returns a list of sorted tiles, with the outer key (tile_rastername)
     being added to the inner dictionary as a value with the same name (so
     there's now a list of dicts, rather than a nested dict):
-    [{'tile_rastername':x, 'distance':y, 'nodatas':z}, {...}, ...]
+    [{'tile_rastername':x, 'distance':y, 'nodatas':z, 'override':a}, {...}, ...]
     '''
 
     #: First, convert nested dictionary to list of dictionaries while inserting
@@ -602,19 +602,30 @@ def sort_tiles(cell):
     tile_list = []
     for tile_rastername in cell:
         tile_list.append({'tile_rastername': tile_rastername,
-                           'distance': cell[tile_rastername]['distance'],
-                           'nodatas':cell[tile_rastername]['nodatas']
-                           })
+                          'distance': cell[tile_rastername]['distance'],
+                          'nodatas':cell[tile_rastername]['nodatas'],
+                          'override':cell[tile_rastername]['override']
+                          })
 
-    #: sort the list of chunks based on distance
-    tile_list.sort(key=lambda chunk_dict: chunk_dict['distance'])
+    #: First, sort out an override tile if present
+    #: Assumes there is only 1 or 0 override tiles (only takes the first 
+    #: override tile it finds)
+    tile_list.sort(key=lambda tile_dict: tile_dict['override'], reverse=True)
+    if tile_list[0]['override']:
+        sorted_list = tile_list[:1]
+        distance_list = tile_list[1:]
+    else:
+        sorted_list = []
+        distance_list = tile_list
 
-    #: Separate out the best chunk, sort remaining by nodatas
-    sorted_list = tile_list[:1]
-    seconds_list = tile_list[1:]
-    seconds_list.sort(key=lambda chunk_dict: chunk_dict['nodatas'])
+    #: Next, sort out the shortest distance
+    distance_list.sort(key=lambda tile_dict: tile_dict['distance'])
+    sorted_list.extend(distance_list[:1])
+    nodatas_list = distance_list[1:]
 
-    sorted_list.extend(seconds_list)
+    #: Finally, sort the remaining from least to most nodatas
+    nodatas_list.sort(key=lambda tile_dict: tile_dict['nodatas'])
+    sorted_list.extend(nodatas_list)
 
     return sorted_list
 
