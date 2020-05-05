@@ -115,6 +115,7 @@ def create_fishnet_indices(ulx, uly, lrx, lry, dimension, pixels=False, pixel_si
 def create_polygon(coords):
     '''
     Creates a WKT polygon from a list of coordinates
+    coords: [(x1,y1), (x2,y2), (xn,yn)..., (x1,y1)]
     '''
     ring = ogr.Geometry(ogr.wkbLinearRing)
     for coord in coords:
@@ -362,7 +363,7 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
     return distances
 
 
-def tile_rectified_rasters(rectified_dir, shp_path, tiled_dir, fishnet_size):
+def tile_rectified_rasters(rectified_dir, extents_path, shp_path, tiled_dir, fishnet_size):
     '''
     Tiles all the rasters in rectified_dir into tiles based on a fishnet
     starting at the upper left of all the rasters and that has cells of
@@ -376,6 +377,13 @@ def tile_rectified_rasters(rectified_dir, shp_path, tiled_dir, fishnet_size):
     Returns: A list of dictionaries containing the tile information like so:
     [{cell_index: (rastername, distance, nodatas)}, {}, ...]
     '''
+
+    #: {filename:[(xmin, ymax),
+    #:            (xmax, ymax),
+    #:            (xmax, ymin),
+    #:            (xmin, ymin),
+    #:            (xmin, ymax)]}
+    extents = {}
 
     # Loop through rectified rasters, check for ul/lr x/y to get bounding box
     # ulx is the smallest x value, so we set it high and check if the current
@@ -391,16 +399,51 @@ def tile_rectified_rasters(rectified_dir, shp_path, tiled_dir, fishnet_size):
         for fname in files:
             if fname[-4:] == ".tif":
                 img_path = os.path.join(root, fname)
-                bounds = get_bounding_box(img_path)
-                if bounds[0] < ulx:
-                    ulx = bounds[0]
-                if bounds[1] > uly:
-                    uly = bounds[1]
-                if bounds[2] > lrx:
-                    lrx = bounds[2]
-                if bounds[3] < lry:
-                    lry = bounds[3]
+                xmin, ymax, xmax, ymin = get_bounding_box(img_path)
+
+                if xmin < ulx:
+                    ulx = xmin
+                if ymax > uly:
+                    uly = ymax
+                if xmax > lrx:
+                    lrx = xmax
+                if ymin < lry:
+                    lry = ymin
+
+                #: Add to extents dictionary
+                extents[fname] = [(xmin, ymax),
+                                  (xmax, ymax),
+                                  (xmax, ymin),
+                                  (xmin, ymin),
+                                  (xmin, ymax)]
     # print("{}, {}; {}, {}".format(ulx, uly, lrx, lry))
+
+    epsg_code = 26912
+    #epsg_code = 32612
+
+    #: Set up extents shapefile
+    shp_driver = ogr.GetDriverByName('ESRI Shapefile')
+    extents_datasource = shp_driver.CreateDataSource(extents_path)
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(epsg_code)
+    extents_layer = extents_datasource.CreateLayer('', srs, ogr.wkbPolygon)
+    extents_layer.CreateField(ogr.FieldDefn('file_name', ogr.OFTString))
+
+    #: Write the extents out to shapefile
+    defn = extents_layer.GetLayerDefn()
+    for raster_filename in extents:
+        feature = ogr.Feature(defn)
+        feature.SetField('file_name', raster_filename)
+        poly = create_polygon(extents[raster_filename])
+        geom = ogr.CreateGeometryFromWkt(poly)
+        feature.SetGeometry(geom)
+        extents_layer.CreateFeature(feature)
+        feature = None
+        poly = None
+        geom = None
+
+    extents_layer = None
+    extents_datasource = None
 
     # Create tiling scheme
     fishnet = create_fishnet_indices(ulx, uly, lrx, lry, fishnet_size)
@@ -411,8 +454,8 @@ def tile_rectified_rasters(rectified_dir, shp_path, tiled_dir, fishnet_size):
     shp_driver = ogr.GetDriverByName('ESRI Shapefile')
     shp_ds = shp_driver.CreateDataSource(shp_path)
     srs = osr.SpatialReference()
-    # srs.ImportFromEPSG(32612)
-    srs.ImportFromEPSG(26912)
+
+    srs.ImportFromEPSG(epsg_code)
     layer = shp_ds.CreateLayer('', srs, ogr.wkbPolygon)
     layer.CreateField(ogr.FieldDefn('raster', ogr.OFTString))
     layer.CreateField(ogr.FieldDefn('cell', ogr.OFTString))
@@ -569,6 +612,7 @@ def run(source_dir, output_dir, name, fishnet_size, cleanup=False, tile=True):
     csv_path = output_dir/f'{name}_mosaic.csv'
     vrt_path = output_dir/f'{name}.vrt'
     tif_path = output_dir/f'{name}.tif'
+    extents_path = output_dir/f'{name}_extents.shp'
 
 
     print(f'\nMerging {source_dir} into {tif_path}\n')
@@ -587,6 +631,7 @@ def run(source_dir, output_dir, name, fishnet_size, cleanup=False, tile=True):
     files.extend([tif for tif in output_dir.glob(f'{name}.tif*')])
     #: Add CSV and all shapefile files
     files.extend([shp for shp in output_dir.glob(f'{name}_mosaic.*')])
+    files.extend([shp for shp in output_dir.glob(f'{name}_extents.*')])
     for file_path in files:
         if file_path.exists():  #: 3.8 will allow unlink(missing_ok=True)
             print(f'Deleting {file_path}...')
@@ -595,7 +640,7 @@ def run(source_dir, output_dir, name, fishnet_size, cleanup=False, tile=True):
     # Retile if needed; otherwise, just read the shapefile
     if tile:
         print(f'\nTiling source rasters into {tile_path}...')
-        all_cells = tile_rectified_rasters(str(source_dir), str(poly_path), str(tile_path), fishnet_size)
+        all_cells = tile_rectified_rasters(str(source_dir), str(extents_path), str(poly_path), str(tile_path), fishnet_size)
     else:
         all_cells = read_chunk_from_shapefile(str(poly_path))
 
@@ -679,12 +724,12 @@ def run(source_dir, output_dir, name, fishnet_size, cleanup=False, tile=True):
 if "__main__" in __name__:
 
     cleanup = False  #: Set to False to keep temp files for troubleshooting
-    fishnet_size = 20  #: in map units
+    fishnet_size = 10  #: in map units
     tile = True  #: Set to False to read data on existing tiles from shapefile
 
     #: Paths
-    year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Logan\1930')
-    output_root_dir = Path(r'F:\WasatchCo\sanborn_edgedistance')
+    year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Sandy\1911')
+    output_root_dir = Path(r'F:\WasatchCo\sanborn_sandy')
 
     year = year_dir.name
     city = year_dir.parent.name
