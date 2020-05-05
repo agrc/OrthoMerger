@@ -705,6 +705,7 @@ def run(source_dir, output_dir, name, fishnet_size, cleanup=False, tile=True):
         files = []
         #: Add CSV and all shapefile files
         files.extend([shp for shp in output_dir.glob(f'{name}_mosaic.*')])
+        files.extend([shp for shp in output_dir.glob(f'{name}_extents.*')])
         for file_path in files:
             if file_path.exists():  #: 3.8 will allow unlink(missing_ok=True)
                 print(f'Deleting {file_path}...')
