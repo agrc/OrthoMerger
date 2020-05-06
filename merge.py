@@ -558,7 +558,7 @@ def read_tiles_from_shapefile(shp_path):
         nodatas = feature.GetField("nodatas")
         override_text = feature.GetField("override")
         override = False
-        if override_text.casefold() == 'y':
+        if override_text and override_text.casefold() == 'y':
             override = True
         tile_rastername = "{}_{}.tif".format(cell_index, rastername[:-4])
 
@@ -662,38 +662,49 @@ def run(source_dir, output_dir, name, fishnet_size, cleanup=False, tile=True):
     tif_path = output_dir/f'{name}.tif'
     extents_path = output_dir/f'{name}_extents.shp'
 
-
     print(f'\nMerging {source_dir} into {tif_path}\n')
-
-    #: File path management
-    if not output_dir.exists():
-        output_dir.mkdir(parents=True)
-
-    if tile_path.exists():
-        print(f'Deleting existing tile directory {tile_path}...')
-        shutil.rmtree(tile_path)
-    tile_path.mkdir(parents=True)
-
-    files = []
-    #: Add all .tif related files, including .tif.xml and .tif.ovr
-    files.extend([tif for tif in output_dir.glob(f'{name}.tif*')])
-    #: Add CSV and all shapefile files
-    files.extend([shp for shp in output_dir.glob(f'{name}_mosaic.*')])
-    files.extend([shp for shp in output_dir.glob(f'{name}_extents.*')])
-    for file_path in files:
-        if file_path.exists():  #: 3.8 will allow unlink(missing_ok=True)
-            print(f'Deleting {file_path}...')
-            file_path.unlink()
 
     # Retile if needed; otherwise, just read the shapefile
     if tile:
+        #: File path management
+        if not output_dir.exists():
+            output_dir.mkdir(parents=True)
+
+        if tile_path.exists():
+            print(f'Deleting existing tile directory {tile_path}...')
+            shutil.rmtree(tile_path)
+        tile_path.mkdir(parents=True)
+
+        files = []
+        #: Add all .tif related files, including .tif.xml and .tif.ovr
+        files.extend([tif for tif in output_dir.glob(f'{name}.tif*')])
+        #: Add CSV and all shapefile files
+        files.extend([shp for shp in output_dir.glob(f'{name}_mosaic.*')])
+        files.extend([shp for shp in output_dir.glob(f'{name}_extents.*')])
+        for file_path in files:
+            if file_path.exists():  #: 3.8 will allow unlink(missing_ok=True)
+                print(f'Deleting {file_path}...')
+                file_path.unlink()
+
         print(f'\nTiling source rasters into {tile_path}...')
         all_cells = generate_tiles_from_rasters(str(source_dir), str(extents_path), str(poly_path), str(tile_path), fishnet_size)
-    else:
-        all_cells = read_tiles_from_shapefile(str(poly_path))
 
-    #: Extra print for end of progbar
-    # print('')
+    else:
+        #: Existing override cleanup
+        files = []
+        files.extend([f for f in output_dir.glob(f'{name}_overrides.*')])
+        files.extend([f for f in output_dir.glob(f'{name}_mosaic_overrides.*')])
+        for file_path in files:
+            if file_path.exists():  #: 3.8 will allow unlink(missing_ok=True)
+                print(f'Deleting {file_path}...')
+                file_path.unlink()
+
+        print(f'\nReading existing tiles from {poly_path}...')
+
+        csv_path = output_dir/f'{name}_mosaic_overrides.csv'
+        vrt_path = output_dir/f'{name}_overrides.vrt'
+        tif_path = output_dir/f'{name}_overrides.tif'
+        all_cells = read_tiles_from_shapefile(str(poly_path))
 
     #: Create list of sorted dictionaries. The dictionaries for each cell are
     #: flattened and then sorted by distance and then nodatas (first is always
@@ -774,7 +785,7 @@ if "__main__" in __name__:
 
     cleanup = False  #: Set to False to keep temp files for troubleshooting
     fishnet_size = 10  #: in map units
-    tile = True  #: Set to False to read data on existing tiles from shapefile
+    tile = False  #: Set to False to read data on existing tiles from shapefile
 
     #: Paths
     year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Sandy\1911')
