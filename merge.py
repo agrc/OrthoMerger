@@ -785,11 +785,11 @@ if "__main__" in __name__:
 
     cleanup = False  #: Set to False to keep temp files for troubleshooting
     fishnet_size = 10  #: in map units
-    tile = False  #: Set to False to read data on existing tiles from shapefile
+    tile = True  #: Set to False to read data on existing tiles from shapefile
 
     #: Paths
-    year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Sandy\1911')
-    output_root_dir = Path(r'F:\WasatchCo\sanborn_sandy')
+    year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Green River\1917')
+    output_root_dir = Path(r'F:\WasatchCo\sanborn_geofixes')
 
     year = year_dir.name
     city = year_dir.parent.name
