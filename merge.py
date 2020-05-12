@@ -26,6 +26,63 @@ from osgeo import gdal
 from osgeo import ogr
 from osgeo import osr
 
+import cv2
+
+
+class Peak:
+    def __init__(self, startidx):
+        self.born = self.left = self.right = startidx
+        self.died = None
+
+    def get_persistence(self, seq):
+        return float("inf") if self.died is None else seq[self.born] - seq[self.died]
+
+
+def get_persistent_homology(seq):
+    peaks = []
+    # Maps indices to peaks
+    idxtopeak = [None for s in seq]
+    # Sequence indices sorted by values
+    indices = range(len(seq))
+    indices = sorted(indices, key = lambda i: seq[i], reverse=True)
+
+    # Process each sample in descending order
+    for idx in indices:
+        lftdone = (idx > 0 and idxtopeak[idx-1] is not None)
+        rgtdone = (idx < len(seq)-1 and idxtopeak[idx+1] is not None)
+        il = idxtopeak[idx-1] if lftdone else None
+        ir = idxtopeak[idx+1] if rgtdone else None
+
+        # New peak born
+        if not lftdone and not rgtdone:
+            peaks.append(Peak(idx))
+            idxtopeak[idx] = len(peaks)-1
+
+        # Directly merge to next peak left
+        if lftdone and not rgtdone:
+            peaks[il].right += 1
+            idxtopeak[idx] = il
+
+        # Directly merge to next peak right
+        if not lftdone and rgtdone:
+            peaks[ir].left -= 1
+            idxtopeak[idx] = ir
+
+        # Merge left and right peaks
+        if lftdone and rgtdone:
+            # Left was born earlier: merge right to left
+            if seq[peaks[il].born] > seq[peaks[ir].born]:
+                peaks[ir].died = idx
+                peaks[il].right = peaks[ir].right
+                idxtopeak[peaks[il].right] = idxtopeak[idx] = il
+            else:
+                peaks[il].died = idx
+                peaks[ir].left = peaks[il].left
+                idxtopeak[peaks[ir].left] = idxtopeak[idx] = ir
+
+    # This is optional convenience
+    return sorted(peaks, key=lambda p: p.get_persistence(seq), reverse=True)
+
 
 #: GDAL callback method that seems to work, as per
 #: https://gis.stackexchange.com/questions/237479/using-callback-with-python-gdal-rasterizelayer
@@ -282,6 +339,9 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
             t_trans = (raster_chunk_xmin, raster_xwidth, 0, raster_chunk_ymax, 0, raster_yheight)
             t_fh.SetGeoTransform(t_trans)
 
+            #: Hold all three bands for color segmentation
+            all_array = np.full((y_size, x_size, bands), s_nodata)
+
             num_nodata = 0
             # Loop through all the bands of the raster and copy to a new chunk
             for band in range(1, bands + 1):
@@ -303,6 +363,9 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
                 # Put source raster data into appropriate place of slice array
                 slice_array[sa_y_start:sa_y_end, sa_x_start:sa_x_end] = read_array
 
+                #: Add read-in data to full color array
+                all_array[:,:,band-1] = slice_array
+
                 # Write source array to disk
                 t_band.WriteArray(slice_array)
                 t_band = None
@@ -310,6 +373,12 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
 
             # Close target file handle
             t_fh = None
+
+            byte_array = np.round(255. * (all_array - all_array.min()) / (all_array.max() - all_array.min() - 1.)).astype(np.uint8)
+
+            hsv_array = cv2.cvtColor(byte_array, cv2.COLOR_RGB2HSV)
+            histogram = cv2.calcHist([hsv_array], [0], None, [180], [0, 180])
+            num_peaks = len(get_persistent_homology(histogram))
 
             # Calculate distance from cell center to raster center
             cell_center = np.array((cell_xmid, cell_ymid))
