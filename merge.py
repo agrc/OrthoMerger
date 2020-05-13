@@ -392,6 +392,7 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
             #: Set up color ranges (in hue values)
             blues_reds = [b for b in range(95, 105)]
             blues_reds.extend([r for r in range(170, 179)])
+            blues_reds.extend([r for r in range(1, 5)])
             yellows = [y for y in range(22, 28)]
 
             #: blues or reds are weighted more heavily
