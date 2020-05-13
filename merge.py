@@ -386,7 +386,7 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
             hsv_array = cv2.cvtColor(byte_array, cv2.COLOR_RGB2HSV)
             histogram = cv2.calcHist([hsv_array], [0], None, [180], [0, 180])
             # num_peaks = len(get_persistent_homology(histogram))
-            peaks, _ = find_peaks(histogram.reshape((180)))
+            peaks, _ = find_peaks(histogram.reshape((180)), height=500)
             num_peaks = len(peaks)
 
             # Calculate distance from cell center to raster center
@@ -703,7 +703,12 @@ def sort_tiles(cell):
     #: Next, sort out the most peaks
     peaks_list.sort(key=lambda tile_dict: tile_dict['peaks'], reverse=True)
     sorted_list.extend(peaks_list[:1])
-    nodatas_list = peaks_list[1:]
+    distance_list = peaks_list[1:]
+
+    #: Sort out shortest distance
+    distance_list.sort(key=lambda tile_dict: tile_dict['distance'])
+    sorted_list.extend(distance_list[:1])
+    nodatas_list = distance_list[1:]
 
     #: Finally, sort the remaining from least to most nodatas
     nodatas_list.sort(key=lambda tile_dict: tile_dict['nodatas'])
@@ -871,7 +876,7 @@ if "__main__" in __name__:
 
     #: Paths
     year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Logan\1930')
-    output_root_dir = Path(r'F:\WasatchCo\sanborn_color_scipy')
+    output_root_dir = Path(r'F:\WasatchCo\sanborn_color_scipy_height')
 
     year = year_dir.name
     city = year_dir.parent.name
