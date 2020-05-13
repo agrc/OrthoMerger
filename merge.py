@@ -387,7 +387,22 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
             histogram = cv2.calcHist([hsv_array], [0], None, [180], [0, 180])
             # num_peaks = len(get_persistent_homology(histogram))
             peaks, _ = find_peaks(histogram.reshape((180)), height=500)
-            num_peaks = len(peaks)
+            num_peaks = 0
+
+            #: Set up color ranges (in hue values)
+            blues_reds = [b for b in range(95, 105)]
+            blues_reds.extend([r for r in range(170, 179)])
+            yellows = [y for y in range(22, 28)]
+
+            #: blues or reds are weighted more heavily
+            for color in blues_reds:
+                if color in peaks:
+                    num_peaks += 2
+
+            #: yellows are not because of potential confusion with background
+            for color in yellows:
+                if color in peaks:
+                    num_peaks += 1
 
             # Calculate distance from cell center to raster center
             cell_center = np.array((cell_xmid, cell_ymid))
@@ -876,7 +891,7 @@ if "__main__" in __name__:
 
     #: Paths
     year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Logan\1930')
-    output_root_dir = Path(r'F:\WasatchCo\sanborn_color_scipy_height')
+    output_root_dir = Path(r'F:\WasatchCo\sanborn_color_scipy_numcolors')
 
     year = year_dir.name
     city = year_dir.parent.name
