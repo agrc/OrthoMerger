@@ -27,6 +27,7 @@ from osgeo import ogr
 from osgeo import osr
 
 import cv2
+from scipy.signal import find_peaks
 
 
 class Peak:
@@ -374,11 +375,19 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
             # Close target file handle
             t_fh = None
 
+            #: Scale back down to 0-255
+            #: This will mess with NoDatas, but that would just show up as an
+            #: additional color. May need to sort by nodata's first, then by
+            #: number of colors...?
             byte_array = np.round(255. * (all_array - all_array.min()) / (all_array.max() - all_array.min() - 1.)).astype(np.uint8)
 
+            #: Convert to hsv, calc hue histogram, count number of peaks
+            #: Jpeg artifacts may introduce additional colors around edges
             hsv_array = cv2.cvtColor(byte_array, cv2.COLOR_RGB2HSV)
             histogram = cv2.calcHist([hsv_array], [0], None, [180], [0, 180])
-            num_peaks = len(get_persistent_homology(histogram))
+            # num_peaks = len(get_persistent_homology(histogram))
+            peaks, _ = find_peaks(histogram.reshape((180)))
+            num_peaks = len(peaks)
 
             # Calculate distance from cell center to raster center
             cell_center = np.array((cell_xmid, cell_ymid))
@@ -403,6 +412,7 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
             feature.SetField('cell', cell_index)
             feature.SetField('d_to_cent', distance)
             feature.SetField('nodatas', new_num_nodata)
+            feature.SetField('peaks', num_peaks)
             poly = create_polygon(coords)
             geom = ogr.CreateGeometryFromWkt(poly)
             feature.SetGeometry(geom)
@@ -423,7 +433,8 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
                 cells[cell_index] = {}
             cells[cell_index][tile_rastername] = {'distance': distance,
                                                   'nodatas': new_num_nodata,
-                                                  'override': False
+                                                  'override': False,
+                                                  'peaks': num_peaks
                                                  }
 
             # tile_key = t_rastername[:-4]
@@ -546,6 +557,7 @@ def generate_tiles_from_rasters(rectified_dir, extents_path, shp_path, tiled_dir
     layer.CreateField(ogr.FieldDefn('cell', ogr.OFTString))
     layer.CreateField(ogr.FieldDefn('d_to_cent', ogr.OFTReal))
     layer.CreateField(ogr.FieldDefn('nodatas', ogr.OFTReal))
+    layer.CreateField(ogr.FieldDefn('peaks', ogr.OFTReal))
     layer.CreateField(ogr.FieldDefn('override', ogr.OFTString))
 
     #: Master dictionary containing info about every cell in our extent
@@ -673,7 +685,8 @@ def sort_tiles(cell):
         tile_list.append({'tile_rastername': tile_rastername,
                           'distance': cell[tile_rastername]['distance'],
                           'nodatas':cell[tile_rastername]['nodatas'],
-                          'override':cell[tile_rastername]['override']
+                          'override':cell[tile_rastername]['override'],
+                          'peaks':cell[tile_rastername]['peaks']
                           })
 
     #: First, sort out an override tile if present
@@ -682,15 +695,15 @@ def sort_tiles(cell):
     tile_list.sort(key=lambda tile_dict: tile_dict['override'], reverse=True)
     if tile_list[0]['override']:
         sorted_list = tile_list[:1]
-        distance_list = tile_list[1:]
+        peaks_list = tile_list[1:]
     else:
         sorted_list = []
-        distance_list = tile_list
+        peaks_list = tile_list
 
-    #: Next, sort out the shortest distance
-    distance_list.sort(key=lambda tile_dict: tile_dict['distance'])
-    sorted_list.extend(distance_list[:1])
-    nodatas_list = distance_list[1:]
+    #: Next, sort out the most peaks
+    peaks_list.sort(key=lambda tile_dict: tile_dict['peaks'], reverse=True)
+    sorted_list.extend(peaks_list[:1])
+    nodatas_list = peaks_list[1:]
 
     #: Finally, sort the remaining from least to most nodatas
     nodatas_list.sort(key=lambda tile_dict: tile_dict['nodatas'])
@@ -857,8 +870,8 @@ if "__main__" in __name__:
     tile = True  #: Set to False to read data on existing tiles from shapefile
 
     #: Paths
-    year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Green River\1917')
-    output_root_dir = Path(r'F:\WasatchCo\sanborn_geofixes')
+    year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Logan\1930')
+    output_root_dir = Path(r'F:\WasatchCo\sanborn_color_scipy')
 
     year = year_dir.name
     city = year_dir.parent.name
