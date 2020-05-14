@@ -335,13 +335,14 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
             #: Extend histogram to catch peaks at edges
             histogram = cv2.calcHist([hsv_array], [2], None, [258], [-1, 257])
             # num_peaks = len(get_persistent_homology(histogram))
-            peaks, _ = find_peaks(histogram.reshape((258)), height=250)
+            peaks, _ = find_peaks(histogram.reshape((258)), height=250, distance=3)
 
             #: Value cases:
             #: peak @1 = black edge/nodatas (bad)
             #: peak >252: background (bad)
             #: peak <100: black text (bad)
             #: peak >100 <=252: good data (good)
+            #: peak >190 <200: brown edge (bad)
             good_peaks = 0
             bad_peaks = 0
 
@@ -350,12 +351,16 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
                     #: Weight edges greater so that they don't override a blank
                     #: tile in the middle of another map
                     bad_peaks += 10
-                elif peak < 100:
+                elif peak <= 100:  #: Black text usually shows up here
+                    bad_peaks += 2
+                elif peak > 100 and peak <= 185:  #: Dark brown buildings
+                    good_peaks += 1
+                elif peak > 185 and peak < 200:  #: Brown edge
                     bad_peaks += 1
-                elif peak > 100 and peak <= 253:
+                elif peak >= 200 and peak <= 253:  #: Red and yellow buildings
                     good_peaks += 1
                 elif peak > 253:
-                    bad_peaks += 1
+                    bad_peaks += 1  #: Background tan
 
             num_peaks = good_peaks - bad_peaks
 
@@ -673,20 +678,30 @@ def sort_tiles(cell):
     #: Next, sort out tile with highest peak value (but only if > 0)
     peaks_list.sort(key=lambda tile_dict: tile_dict['peaks'], reverse=True)
     if peaks_list[0]['peaks'] > 0:
-        sorted_list = peaks_list[:1]
+        sorted_list.extend(peaks_list[:1])
         distance_list = peaks_list[1:]
     else:
-        sorted_list = []
         distance_list = peaks_list
 
-    #: Sort out shortest distance
-    distance_list.sort(key=lambda tile_dict: tile_dict['distance'])
-    sorted_list.extend(distance_list[:1])
-    nodatas_list = distance_list[1:]
+    #: Pull out any that have 0 nodatas, then sort those by distance
+    inner_list = []
+    outer_list = []
+    for tile_dict in distance_list:
+        if not tile_dict['nodatas']:
+            inner_list.append(tile_dict)
+        else:
+            outer_list.append(tile_dict)
+
+    #: Sort shortest distance out of 0 nodatas
+    if inner_list:
+        inner_list.sort(key=lambda tile_dict: tile_dict['distance'])
+        sorted_list.extend(inner_list[:1])
+        #: Add our non-chosen tiles back into our collection
+        outer_list.extend(inner_list[1:])
 
     #: Finally, sort the remaining from least to most nodatas
-    nodatas_list.sort(key=lambda tile_dict: tile_dict['nodatas'])
-    sorted_list.extend(nodatas_list)
+    outer_list.sort(key=lambda tile_dict: tile_dict['nodatas'])
+    sorted_list.extend(outer_list)
 
     return sorted_list
 
@@ -850,7 +865,7 @@ if "__main__" in __name__:
 
     #: Paths
     year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Logan\1930')
-    output_root_dir = Path(r'F:\WasatchCo\sanborn_color_scipy_valuepeaks3')
+    output_root_dir = Path(r'F:\WasatchCo\sanborn_color_scipy_valuepeaks5')
 
     year = year_dir.name
     city = year_dir.parent.name
