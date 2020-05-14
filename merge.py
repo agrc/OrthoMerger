@@ -30,61 +30,6 @@ import cv2
 from scipy.signal import find_peaks
 
 
-class Peak:
-    def __init__(self, startidx):
-        self.born = self.left = self.right = startidx
-        self.died = None
-
-    def get_persistence(self, seq):
-        return float("inf") if self.died is None else seq[self.born] - seq[self.died]
-
-
-def get_persistent_homology(seq):
-    peaks = []
-    # Maps indices to peaks
-    idxtopeak = [None for s in seq]
-    # Sequence indices sorted by values
-    indices = range(len(seq))
-    indices = sorted(indices, key = lambda i: seq[i], reverse=True)
-
-    # Process each sample in descending order
-    for idx in indices:
-        lftdone = (idx > 0 and idxtopeak[idx-1] is not None)
-        rgtdone = (idx < len(seq)-1 and idxtopeak[idx+1] is not None)
-        il = idxtopeak[idx-1] if lftdone else None
-        ir = idxtopeak[idx+1] if rgtdone else None
-
-        # New peak born
-        if not lftdone and not rgtdone:
-            peaks.append(Peak(idx))
-            idxtopeak[idx] = len(peaks)-1
-
-        # Directly merge to next peak left
-        if lftdone and not rgtdone:
-            peaks[il].right += 1
-            idxtopeak[idx] = il
-
-        # Directly merge to next peak right
-        if not lftdone and rgtdone:
-            peaks[ir].left -= 1
-            idxtopeak[idx] = ir
-
-        # Merge left and right peaks
-        if lftdone and rgtdone:
-            # Left was born earlier: merge right to left
-            if seq[peaks[il].born] > seq[peaks[ir].born]:
-                peaks[ir].died = idx
-                peaks[il].right = peaks[ir].right
-                idxtopeak[peaks[il].right] = idxtopeak[idx] = il
-            else:
-                peaks[il].died = idx
-                peaks[ir].left = peaks[il].left
-                idxtopeak[peaks[ir].left] = idxtopeak[idx] = ir
-
-    # This is optional convenience
-    return sorted(peaks, key=lambda p: p.get_persistence(seq), reverse=True)
-
-
 #: GDAL callback method that seems to work, as per
 #: https://gis.stackexchange.com/questions/237479/using-callback-with-python-gdal-rasterizelayer
 def gdal_progress_callback(complete, message, unknown):
@@ -341,7 +286,7 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
             t_fh.SetGeoTransform(t_trans)
 
             #: Hold all three bands for color segmentation
-            all_array = np.full((y_size, x_size, bands), s_nodata)
+            all_array = np.full((y_size, x_size, bands), s_nodata, np.int16)
 
             num_nodata = 0
             # Loop through all the bands of the raster and copy to a new chunk
@@ -365,7 +310,7 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
                 slice_array[sa_y_start:sa_y_end, sa_x_start:sa_x_end] = read_array
 
                 #: Add read-in data to full color array
-                all_array[:,:,band-1] = slice_array
+                all_array[:, :, band-1] = slice_array
 
                 # Write source array to disk
                 t_band.WriteArray(slice_array)
@@ -379,31 +324,40 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
             #: This will mess with NoDatas, but that would just show up as an
             #: additional color. May need to sort by nodata's first, then by
             #: number of colors...?
-            byte_array = np.round(255. * (all_array - all_array.min()) / (all_array.max() - all_array.min() - 1.)).astype(np.uint8)
+            # byte_array = np.round(255. * (all_array - all_array.min()) / (all_array.max() - all_array.min() - 1.)).astype(np.uint8)
 
-            #: Convert to hsv, calc hue histogram, count number of peaks
+            #: Convert to hsv, calc value histogram, count number of peaks
             #: Jpeg artifacts may introduce additional colors around edges
-            hsv_array = cv2.cvtColor(byte_array, cv2.COLOR_RGB2HSV)
-            histogram = cv2.calcHist([hsv_array], [0], None, [180], [0, 180])
+
+            #: Values outside [0,255] caused by jpeg artifacts; safe enough to
+            #: just discard. Forcing as uint8 keeps original color values
+            hsv_array = cv2.cvtColor(all_array.astype(np.uint8), cv2.COLOR_RGB2HSV)
+            #: Extend histogram to catch peaks at edges
+            histogram = cv2.calcHist([hsv_array], [2], None, [258], [-1, 257])
             # num_peaks = len(get_persistent_homology(histogram))
-            peaks, _ = find_peaks(histogram.reshape((180)), height=500)
-            num_peaks = 0
+            peaks, _ = find_peaks(histogram.reshape((258)), height=250)
 
-            #: Set up color ranges (in hue values)
-            blues_reds = [b for b in range(95, 105)]
-            blues_reds.extend([r for r in range(170, 179)])
-            blues_reds.extend([r for r in range(1, 5)])
-            yellows = [y for y in range(22, 28)]
+            #: Value cases:
+            #: peak @1 = black edge/nodatas (bad)
+            #: peak >252: background (bad)
+            #: peak <100: black text (bad)
+            #: peak >100 <=252: good data (good)
+            good_peaks = 0
+            bad_peaks = 0
 
-            #: blues or reds are weighted more heavily
-            for color in blues_reds:
-                if color in peaks:
-                    num_peaks += 2
+            for peak in peaks:
+                if peak < 5:
+                    #: Weight edges greater so that they don't override a blank
+                    #: tile in the middle of another map
+                    bad_peaks += 10
+                elif peak < 100:
+                    bad_peaks += 1
+                elif peak > 100 and peak <= 253:
+                    good_peaks += 1
+                elif peak > 253:
+                    bad_peaks += 1
 
-            #: yellows are not because of potential confusion with background
-            for color in yellows:
-                if color in peaks:
-                    num_peaks += 1
+            num_peaks = good_peaks - bad_peaks
 
             # Calculate distance from cell center to raster center
             cell_center = np.array((cell_xmid, cell_ymid))
@@ -716,10 +670,14 @@ def sort_tiles(cell):
         sorted_list = []
         peaks_list = tile_list
 
-    #: Next, sort out the most peaks
+    #: Next, sort out tile with highest peak value (but only if > 0)
     peaks_list.sort(key=lambda tile_dict: tile_dict['peaks'], reverse=True)
-    sorted_list.extend(peaks_list[:1])
-    distance_list = peaks_list[1:]
+    if peaks_list[0]['peaks'] > 0:
+        sorted_list = peaks_list[:1]
+        distance_list = peaks_list[1:]
+    else:
+        sorted_list = []
+        distance_list = peaks_list
 
     #: Sort out shortest distance
     distance_list.sort(key=lambda tile_dict: tile_dict['distance'])
@@ -892,7 +850,7 @@ if "__main__" in __name__:
 
     #: Paths
     year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Logan\1930')
-    output_root_dir = Path(r'F:\WasatchCo\sanborn_color_scipy_numcolors')
+    output_root_dir = Path(r'F:\WasatchCo\sanborn_color_scipy_valuepeaks3')
 
     year = year_dir.name
     city = year_dir.parent.name
