@@ -333,9 +333,13 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
             #: just discard. Forcing as uint8 keeps original color values
             hsv_array = cv2.cvtColor(all_array.astype(np.uint8), cv2.COLOR_RGB2HSV)
             #: Extend histogram to catch peaks at edges
-            histogram = cv2.calcHist([hsv_array], [2], None, [258], [-1, 257])
+            hue_histogram = cv2.calcHist([hsv_array], [0], None, [182], [-1, 181])
+            sat_histogram = cv2.calcHist([hsv_array], [1], None, [258], [-1, 257])
+            value_histogram = cv2.calcHist([hsv_array], [2], None, [258], [-1, 257])
             # num_peaks = len(get_persistent_homology(histogram))
-            peaks, _ = find_peaks(histogram.reshape((258)), height=250, distance=3)
+            hue_peaks, _ = find_peaks(hue_histogram.reshape((182)), height=250, distance=3)
+            sat_peaks, _ = find_peaks(sat_histogram.reshape((258)), height=250, distance=3)
+            value_peaks, _ = find_peaks(value_histogram.reshape((258)), height=250, distance=3)
 
             #: Value cases:
             #: peak @1 = black edge/nodatas (bad)
@@ -345,22 +349,43 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
             #: peak >190 <200: brown edge (bad)
             good_peaks = 0
             bad_peaks = 0
+            
+            for peak in hue_peaks:
+                if (peak > 1 and peak < 6) or (peak > 170 and peak < 181):
+                    good_peaks += 10  #: Red is good! Always prefer red.
 
-            for peak in peaks:
+            good_sat = False
+            bad_sat = False
+            for peak in sat_peaks:
+                if peak > 10 and peak < 20:
+                    bad_sat = True
+                else:
+                    good_sat = True
+                    
+                #: Yellow buildings (usually) put a peak here
+                if peak > 89 and peak < 105:
+                    good_peaks += 10
+
+            #: If our only sat peaks are between 10, 20, it's likely blank or
+            #: black text
+            if bad_sat and not good_sat:
+                bad_peaks += 2
+
+            for peak in value_peaks:
                 if peak < 5:
                     #: Weight edges greater so that they don't override a blank
                     #: tile in the middle of another map
-                    bad_peaks += 10
+                    bad_peaks += 100
                 elif peak <= 100:  #: Black text usually shows up here
                     bad_peaks += 2
                 elif peak > 100 and peak <= 185:  #: Dark brown buildings
-                    good_peaks += 1
-                elif peak > 185 and peak < 200:  #: Brown edge
-                    bad_peaks += 1
-                elif peak >= 200 and peak <= 253:  #: Red and yellow buildings
-                    good_peaks += 1
-                elif peak > 253:
-                    bad_peaks += 1  #: Background tan
+                    good_peaks += 10
+                elif peak > 185 and peak < 210:  #: Brown edge
+                    bad_peaks += 10
+                elif peak >= 210 and peak <= 249:  #: Red and yellow buildings
+                    good_peaks += 5
+                elif peak > 249:
+                    bad_peaks += 5  #: Background tan
 
             num_peaks = good_peaks - bad_peaks
 
@@ -665,7 +690,7 @@ def sort_tiles(cell):
                           })
 
     #: First, sort out an override tile if present
-    #: Assumes there is only 1 or 0 override tiles (only takes the first 
+    #: Assumes there is only 1 or 0 override tiles (only takes the first
     #: override tile it finds)
     tile_list.sort(key=lambda tile_dict: tile_dict['override'], reverse=True)
     if tile_list[0]['override']:
@@ -675,33 +700,38 @@ def sort_tiles(cell):
         sorted_list = []
         peaks_list = tile_list
 
-    #: Next, sort out tile with highest peak value (but only if > 0)
-    peaks_list.sort(key=lambda tile_dict: tile_dict['peaks'], reverse=True)
-    if peaks_list[0]['peaks'] > 0:
-        sorted_list.extend(peaks_list[:1])
-        distance_list = peaks_list[1:]
-    else:
-        distance_list = peaks_list
+    #: sort by reversed peaks and then distance
+    peaks_list.sort(key=lambda tile_dict: (-tile_dict['peaks'], tile_dict['distance']))
 
-    #: Pull out any that have 0 nodatas, then sort those by distance
-    inner_list = []
-    outer_list = []
-    for tile_dict in distance_list:
-        if not tile_dict['nodatas']:
-            inner_list.append(tile_dict)
-        else:
-            outer_list.append(tile_dict)
+    sorted_list.extend(peaks_list)
 
-    #: Sort shortest distance out of 0 nodatas
-    if inner_list:
-        inner_list.sort(key=lambda tile_dict: tile_dict['distance'])
-        sorted_list.extend(inner_list[:1])
-        #: Add our non-chosen tiles back into our collection
-        outer_list.extend(inner_list[1:])
+    # #: Next, sort out tile with highest peak value (but only if > 0)
+    # peaks_list.sort(key=lambda tile_dict: tile_dict['peaks'], reverse=True)
+    # if peaks_list[0]['peaks'] > 0:
+    #     sorted_list.extend(peaks_list[:1])
+    #     distance_list = peaks_list[1:]
+    # else:
+    #     distance_list = peaks_list
 
-    #: Finally, sort the remaining from least to most nodatas
-    outer_list.sort(key=lambda tile_dict: tile_dict['nodatas'])
-    sorted_list.extend(outer_list)
+    # #: Pull out any that have 0 nodatas, then sort those by distance
+    # inner_list = []
+    # outer_list = []
+    # for tile_dict in distance_list:
+    #     if not tile_dict['nodatas']:
+    #         inner_list.append(tile_dict)
+    #     else:
+    #         outer_list.append(tile_dict)
+
+    # #: Sort shortest distance out of 0 nodatas
+    # if inner_list:
+    #     inner_list.sort(key=lambda tile_dict: tile_dict['distance'])
+    #     sorted_list.extend(inner_list[:1])
+    #     #: Add our non-chosen tiles back into our collection
+    #     outer_list.extend(inner_list[1:])
+
+    # #: Finally, sort the remaining from least to most nodatas
+    # outer_list.sort(key=lambda tile_dict: tile_dict['nodatas'])
+    # sorted_list.extend(outer_list)
 
     return sorted_list
 
