@@ -787,13 +787,35 @@ if "__main__" in __name__:
     fishnet_size = 10  #: in map units
     tile = True  #: Set to False to read data on existing tiles from shapefile
 
-    #: Paths
-    year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Green River\1917')
-    output_root_dir = Path(r'F:\WasatchCo\sanborn_geofixes')
+    # years = [r'C:\gis\Projects\Sanborn\marriott_tif\Sandy\1898',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Sandy\1911',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Scofield\1924',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Spanish Fork\1890',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Spanish Fork\1908',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Spanish Fork\1925',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Spring City\1917',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Springville\1890',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Springville\1898',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Springville\1908',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Tooele\1910',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Tooele\1911',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Tooele\1931',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Vernal\1910',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Vernal\1917'
+    #          ]
 
-    year = year_dir.name
-    city = year_dir.parent.name
-    output_dir = output_root_dir/city
-    filename = f'{city}{year}'
+    years = [r'c:\gis\projects\sanborn\marriott_tif\Salt Lake City\1950']
 
-    run(year_dir, output_dir, filename, fishnet_size, cleanup, tile)
+    for city in years:
+
+        #: Paths
+        # year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Green River\1917')
+        year_dir = Path(city)
+        output_root_dir = Path(r'F:\WasatchCo\sanborn2')
+
+        year = year_dir.name
+        city = year_dir.parent.name
+        output_dir = output_root_dir/city
+        filename = f'{city}{year}'
+
+        run(year_dir, output_dir, filename, fishnet_size, cleanup, tile=False)

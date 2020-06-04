@@ -55,5 +55,5 @@ def time_travel(main_dir_path, output_path):
 
 if __name__ == '__main__':
     source = r'C:\gis\Projects\Sanborn\marriott_tif'
-    destination = r'F:\WasatchCo\sanborn'
+    destination = r'F:\WasatchCo\sanborn2'
     time_travel(source, destination)
