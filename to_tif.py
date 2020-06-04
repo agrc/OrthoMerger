@@ -64,10 +64,10 @@ def translate():
 
     start = datetime.datetime.now()
 
-    jpeg_root = r'c:\gis\projects\sanborn\marriott_source_test'
-    tif_root = r'c:\gis\projects\sanborn\marriott_tif_resolution'
+    jpeg_root = r'c:\gis\projects\sanborn\marriott_source'
+    tif_root = r'c:\gis\projects\sanborn\marriott_tif'
 
-    year_regex = '[0-9]{4}'
+    year_regex = '\d{4}$'
 
     #: Set this option to prevent jpeg size error
     gdal.SetConfigOption('GDAL_ALLOW_LARGE_LIBJPEG_MEM_ALLOC', 'YES')
@@ -119,8 +119,6 @@ def translate():
                                              srcNodata='255 255 255',
                                              dstNodata='256 256 256',
                                              format='GTiff',
-                                             xRes='.08',
-                                             yRes='.08',
                                              outputType=gdal.GDT_Int16,
                                              multithread=True,
                                              creationOptions=creation_opts,

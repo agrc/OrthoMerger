@@ -3,15 +3,53 @@
 # Copyright (c) 2018 Cache County
 # Copyright (c) 2020 Utah AGRC
 
+#: Verbiage
+#: Cell:    The entire area covered by the all the rasters is divided into
+#:          equal-sized cells based on fishnet_size. Cells are the individual
+#:          units of the fishnet.
+#: Tile:    A tile is the piece of a source raster that covers some or all of
+#:          the area defined by a cell. There may be multiple tiles per cell.
+#:          Choosing the right tile to be "on top" of the output raster is the
+#:          main logical task of the program.
 
 import csv
+import datetime
 import os
+import sys
+import shutil
+
+from pathlib import Path
 
 import numpy as np
 
 from osgeo import gdal
 from osgeo import ogr
 from osgeo import osr
+
+
+#: GDAL callback method that seems to work, as per
+#: https://gis.stackexchange.com/questions/237479/using-callback-with-python-gdal-rasterizelayer
+def gdal_progress_callback(complete, message, unknown):
+    '''
+    Progress bar styled after the default GDAL progress bars. Uses specific
+    signature to conform with GDAL core.
+    '''
+    #: 40 stops on our progress bar, so scale to 40
+    done = int(40 * complete / 1)
+
+    #: Build string: 0...10...20... - done.
+    status = ''
+    for i in range(0, done):
+        if i % 4 == 0:
+            status += str(int(i / 4 * 10))
+        else:
+            status += '.'
+    if done == 40:
+        status += '100 - done.\n'
+
+    sys.stdout.write('\r{}'.format(status))
+    sys.stdout.flush()
+    return 1
 
 
 def ceildiv(first, second):
@@ -22,6 +60,10 @@ def ceildiv(first, second):
 
 
 def get_bounding_box(in_path):
+    '''
+    Gets the extent of a GDAL-supported raster in map units
+    '''
+
     s_fh = gdal.Open(in_path, gdal.GA_ReadOnly)
     trans = s_fh.GetGeoTransform()
     ulx = trans[0]
@@ -42,37 +84,38 @@ def create_fishnet_indices(ulx, uly, lrx, lry, dimension, pixels=False, pixel_si
     If pixels is true, assumes dimensions are in pixels and uses pixel_size.
     Otherwise, dimension is in raster coordinate system.
 
-    Returns:    list of tuples (x fishnet index, y fishnet index, chunk ulx,
-                chunk uly, chunk lrx, chunk lry)
+    Returns:    list of tuples (x fishnet index, y fishnet index, cell ulx,
+                cell uly, cell lrx, cell lry)
     '''
 
-    chunks = []
+    cells = []
 
     ref_width = lrx - ulx
     ref_height = uly - lry
     if pixels:
-        chunk_ref_size = dimension * pixel_size
+        cell_ref_size = dimension * pixel_size
     else:
-        chunk_ref_size = dimension
-    num_x_chunks = int(ceildiv(ref_width, chunk_ref_size))
-    num_y_chunks = int(ceildiv(ref_height, chunk_ref_size))
-    for y_chunk in range(0, num_y_chunks):
-        for x_chunk in range(0, num_x_chunks):
-            x_index = x_chunk
-            y_index = y_chunk
-            chunk_ulx = ulx + (chunk_ref_size * x_index)
-            chunk_uly = uly + (-chunk_ref_size * y_index)
-            chunk_lrx = ulx + (chunk_ref_size * (x_index + 1))
-            chunk_lry = uly + (-chunk_ref_size * (y_index + 1))
-            chunks.append((x_index, y_index, chunk_ulx, chunk_uly, chunk_lrx,
-                           chunk_lry))
+        cell_ref_size = dimension
+    num_x_cells = int(ceildiv(ref_width, cell_ref_size))
+    num_y_cells = int(ceildiv(ref_height, cell_ref_size))
+    for y_cell in range(0, num_y_cells):
+        for x_cell in range(0, num_x_cells):
+            x_index = x_cell
+            y_index = y_cell
+            cell_ulx = ulx + (cell_ref_size * x_index)
+            cell_uly = uly + (-cell_ref_size * y_index)
+            cell_lrx = ulx + (cell_ref_size * (x_index + 1))
+            cell_lry = uly + (-cell_ref_size * (y_index + 1))
+            cells.append((x_index, y_index, cell_ulx, cell_uly, cell_lrx,
+                           cell_lry))
 
-    return chunks
+    return cells
 
 
 def create_polygon(coords):
     '''
     Creates a WKT polygon from a list of coordinates
+    coords: [(x1,y1), (x2,y2), (xn,yn)..., (x1,y1)]
     '''
     ring = ogr.Geometry(ogr.wkbLinearRing)
     for coord in coords:
@@ -86,16 +129,23 @@ def create_polygon(coords):
 
 def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
     '''
-    Given a fishnet of a certain size, copy any chunks of a single source raster
-    into individual files corresponding to the fishnet cells. Calculates
-    the distance from the cell center to the raster's center, and stores in
-    a shapefile containing the bounding box of each cell.
+    Given a fishnet of a certain size, copy any portions of a single source
+    raster into individual tiles with the same extent as the fishnet cells.
+    Calculates the distance from the cell center to the raster's center, and
+    stores in the fishnet shapefile containing the bounding box of each cell.
 
-    Returns a nested dictionary containing the distance to center for each sub-chunk
-    in the form {cell_name: {'raster':x, 'distance':y, 'nodata found in chunk':z}, ...}
+    Returns a double nested dictionary containing the information for each tile
+    in the form:
+    {cell_index:
+        {tile_rastername:
+            {'distance':x,
+             'nodatas':y,
+             'override':True/False}
+        }
+    }
     '''
 
-    distances = {}
+    cells = {}
 
     raster_path = os.path.join(root, rastername)
 
@@ -129,7 +179,7 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
     # raster to new subchunks.
     for cell in fishnet:
 
-        cell_name = "{}-{}".format(cell[0], cell[1])
+        cell_index = "{}-{}".format(cell[0], cell[1])
         cell_xmin = cell[2]
         cell_xmax = cell[4]
         cell_ymin = cell[5]
@@ -161,7 +211,7 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
 
             #print("{} {} {} {}".format(x_off, y_off, x_size, y_size))
 
-            # Values for ReadAsArray, these aren't changed later unelss
+            # Values for ReadAsArray, these aren't changed later unless
             # the border case checks change them
             # These are all in pixels
             # We are adding two to read_x/y_size to slightly overread to
@@ -204,9 +254,9 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
                 sa_y_end = read_y_size
 
             # Set up output raster
-            t_rastername = "{}_{}.tif".format(cell_name, rastername[:-4])
-            #print(t_rastername)
-            t_path = os.path.join(target_dir, t_rastername)
+            tile_rastername = "{}_{}.tif".format(cell_index, rastername[:-4])
+            #print(tile_rastername)
+            t_path = os.path.join(target_dir, tile_rastername)
             t_fh = driver.Create(t_path, x_size, y_size, bands, gdal.GDT_Int16, options=lzw_opts)
             t_fh.SetProjection(projection)
 
@@ -268,7 +318,7 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
 
             new_num_nodata = num_nodata / 3.
 
-            print("{}, {}, {}, {}".format(cell_name, rastername, distance, new_num_nodata))
+            # print("{}, {}, {}, {}".format(cell_index, rastername, distance, new_num_nodata))
 
             # Create cell bounding boxes as shapefile, with distance from the
             # middle of the cell to the middle of it's parent raster saved as a
@@ -281,7 +331,7 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
             defn = shp_layer.GetLayerDefn()
             feature = ogr.Feature(defn)
             feature.SetField('raster', rastername)
-            feature.SetField('cell', cell_name)
+            feature.SetField('cell', cell_index)
             feature.SetField('d_to_cent', distance)
             feature.SetField('nodatas', new_num_nodata)
             poly = create_polygon(coords)
@@ -300,14 +350,15 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
             #: a list of nested dicts rather than a double-nested dict (still
             #: need some sort of separation so that sorting occurs at a cell-
             #: level)
-            if cell_name not in distances:
-                distances[cell_name] = {}
-            distances[cell_name][t_rastername] = {'distance': distance,
-                                                  'nodatas': new_num_nodata
+            if cell_index not in cells:
+                cells[cell_index] = {}
+            cells[cell_index][tile_rastername] = {'distance': distance,
+                                                  'nodatas': new_num_nodata,
+                                                  'override': False
                                                  }
 
             # tile_key = t_rastername[:-4]
-            # distances[tile_key] = {'index': cell_name,
+            # distances[tile_key] = {'index': cell_index,
             #                        'raster': rastername,
             #                        'distance': distance,
             #                        'nodatas': new_num_nodata,
@@ -317,10 +368,10 @@ def copy_tiles_from_raster(root, rastername, fishnet, shp_layer, target_dir):
     # close source raster
     s_fh = None
 
-    return distances
+    return cells
 
 
-def tile_rectified_rasters(rectified_dir, shp_path, tiled_dir, fishnet_size):
+def generate_tiles_from_rasters(rectified_dir, extents_path, shp_path, tiled_dir, fishnet_size):
     '''
     Tiles all the rasters in rectified_dir into tiles based on a fishnet
     starting at the upper left of all the rasters and that has cells of
@@ -331,9 +382,24 @@ def tile_rectified_rasters(rectified_dir, shp_path, tiled_dir, fishnet_size):
     cell index, the distance from the center of the tile to the center of the
     parent raster, and the number of nodata pixels in the tile.
 
-    Returns: A list of dictionaries containing the tile information like so:
-    [{cell_index: (rastername, distance, nodatas)}, {}, ...]
+    Returns: A double-nested dictionary built from similarly-formated
+    dictionaries from copy_tiles_from_raster() containing all the information
+    about each cell, formatted like thus:
+    {cell_index:
+        {tile_rastername:
+            {'distance':x,
+             'nodatas':y,
+             'override':True/False}
+        }
+    }
     '''
+
+    #: {filename:[(xmin, ymax),
+    #:            (xmax, ymax),
+    #:            (xmax, ymin),
+    #:            (xmin, ymin),
+    #:            (xmin, ymax)]}
+    extents = {}
 
     # Loop through rectified rasters, check for ul/lr x/y to get bounding box
     # ulx is the smallest x value, so we set it high and check if the current
@@ -349,16 +415,51 @@ def tile_rectified_rasters(rectified_dir, shp_path, tiled_dir, fishnet_size):
         for fname in files:
             if fname[-4:] == ".tif":
                 img_path = os.path.join(root, fname)
-                bounds = get_bounding_box(img_path)
-                if bounds[0] < ulx:
-                    ulx = bounds[0]
-                if bounds[1] > uly:
-                    uly = bounds[1]
-                if bounds[2] > lrx:
-                    lrx = bounds[2]
-                if bounds[3] < lry:
-                    lry = bounds[3]
+                xmin, ymax, xmax, ymin = get_bounding_box(img_path)
+
+                if xmin < ulx:
+                    ulx = xmin
+                if ymax > uly:
+                    uly = ymax
+                if xmax > lrx:
+                    lrx = xmax
+                if ymin < lry:
+                    lry = ymin
+
+                #: Add to extents dictionary
+                extents[fname] = [(xmin, ymax),
+                                  (xmax, ymax),
+                                  (xmax, ymin),
+                                  (xmin, ymin),
+                                  (xmin, ymax)]
     # print("{}, {}; {}, {}".format(ulx, uly, lrx, lry))
+
+    epsg_code = 26912
+    #epsg_code = 32612
+
+    #: Set up extents shapefile
+    shp_driver = ogr.GetDriverByName('ESRI Shapefile')
+    extents_datasource = shp_driver.CreateDataSource(extents_path)
+    srs = osr.SpatialReference()
+    srs.ImportFromEPSG(epsg_code)
+    extents_layer = extents_datasource.CreateLayer('', srs, ogr.wkbPolygon)
+    extents_layer.CreateField(ogr.FieldDefn('file_name', ogr.OFTString))
+
+    #: Write the extents out to shapefile
+    defn = extents_layer.GetLayerDefn()
+    for raster_filename in extents:
+        feature = ogr.Feature(defn)
+        feature.SetField('file_name', raster_filename)
+        poly = create_polygon(extents[raster_filename])
+        geom = ogr.CreateGeometryFromWkt(poly)
+        feature.SetGeometry(geom)
+        extents_layer.CreateFeature(feature)
+        feature = None
+        poly = None
+        geom = None
+
+    extents_layer = None
+    extents_datasource = None
 
     # Create tiling scheme
     fishnet = create_fishnet_indices(ulx, uly, lrx, lry, fishnet_size)
@@ -369,31 +470,44 @@ def tile_rectified_rasters(rectified_dir, shp_path, tiled_dir, fishnet_size):
     shp_driver = ogr.GetDriverByName('ESRI Shapefile')
     shp_ds = shp_driver.CreateDataSource(shp_path)
     srs = osr.SpatialReference()
-    # srs.ImportFromEPSG(32612)
-    srs.ImportFromEPSG(26912)
+
+    srs.ImportFromEPSG(epsg_code)
     layer = shp_ds.CreateLayer('', srs, ogr.wkbPolygon)
     layer.CreateField(ogr.FieldDefn('raster', ogr.OFTString))
     layer.CreateField(ogr.FieldDefn('cell', ogr.OFTString))
     layer.CreateField(ogr.FieldDefn('d_to_cent', ogr.OFTReal))
     layer.CreateField(ogr.FieldDefn('nodatas', ogr.OFTReal))
+    layer.CreateField(ogr.FieldDefn('override', ogr.OFTString))
 
-    # dictionary containing info about every new raster tile
+    #: Master dictionary containing info about every cell in our extent
     all_cells = {}
+
+    counter = 0
 
     # Loop through rectified rasters, create tiles named by index
     for root, dirs, files in os.walk(rectified_dir):
+        total = len(files)
         for fname in files:
             if fname[-4:] == ".tif":
                 #print(fname)
 
-                distances = copy_tiles_from_raster(root, fname, fishnet, layer,
-                                                   tiled_dir)
+                #: Raster progress bar
+                counter +=1
+                percent = counter/total
+                gdal_progress_callback(percent, None, None)
 
-                for cell_index in distances:
+                raster_cells = copy_tiles_from_raster(root, fname, fishnet, layer,
+                                                      tiled_dir)
+
+                #: Merge raster's cells dictionary into master cells dictionary
+                for cell_index in raster_cells:
+                    #: If this cell index already exists, add the raster's tiles
+                    #: by extending the dictionary
                     if cell_index in all_cells:
-                        all_cells[cell_index].update(distances[cell_index])
+                        all_cells[cell_index].update(raster_cells[cell_index])
+                    #: Otherwise, this raster has the first tiles for that cell
                     else:
-                        all_cells[cell_index] = distances[cell_index]
+                        all_cells[cell_index] = raster_cells[cell_index]
 
                 # all_cells.update(distances)
 
@@ -415,103 +529,293 @@ def tile_rectified_rasters(rectified_dir, shp_path, tiled_dir, fishnet_size):
     return all_cells
 
 
-def read_chunk_from_shapefile(shp_path):
+def read_tiles_from_shapefile(shp_path):
+    '''
+    Read the information for each specific cell from the mosaic shapefile.
+
+    Returns: A double-nested dictionary read from the shapefile's features
+    containing all the information about each cell, formatted like thus:
+    {cell_index:
+        {tile_rastername:
+            {'distance':x,
+             'nodatas':y,
+             'override':True/False}
+        }
+    }
+    '''
+
     driver = ogr.GetDriverByName('ESRI Shapefile')
     shape_s_dh = driver.Open(shp_path, 0)
     layer = shape_s_dh.GetLayer()
 
-    #{cell_index: {rastername:x, distance:x, nodatas:x}, ...}
+    #{cell_index: {rastername: {distance:x, nodatas:x, override:x}}}
     cells = {}
+    #: Ever feature is a tile (identified by tile_rastername)
     for feature in layer:
         cell_index = feature.GetField("cell")
         rastername = feature.GetField("raster")
         distance = feature.GetField("d_to_cent")
         nodatas = feature.GetField("nodatas")
-        chunk_rastername = "{}_{}.tif".format(cell_index, rastername[:-4])
+        override_text = feature.GetField("override")
+        override = False
+        if override_text and override_text.casefold() == 'y':
+            override = True
+        tile_rastername = "{}_{}.tif".format(cell_index, rastername[:-4])
 
+        tile_dict = {'distance': distance,
+                     'nodatas': nodatas,
+                     'override': override}
+
+        #: If the cell already exists, add tile dictionary to that cell's dict
         if cell_index in cells:
-            cells[cell_index][chunk_rastername] = {'distance': distance,
-                                                   'nodatas': nodatas
-                                                  }
+            cells[cell_index][tile_rastername] = tile_dict
+        #: Otherwise, create new sub-dict for that cell and add tile dictionary
+        else:
+            cells[cell_index] = {tile_rastername: tile_dict}
 
-        # tile_key = f'{cell_index}_{rastername[:-4]}'
-        # cells[tile_key] = {'index': cell_index,
-        #                    'raster': rastername,
-        #                    'distance': distance,
-        #                    'nodatas': nodatas,
-        #                    'tile': tile_key
-        #                    }
-        # cells.append(celldict)
     layer = None
     shape_s_dh = None
 
     return cells
 
 
-def sort_chunks(cell):
+def sort_tiles(cell):
     '''
-    Sort the source raster chunks in a cell based on distance to center then
-    # of nodatas.
-    'cell' is a nested dictionary thus:
-       {chunk_rastername: {'distance': distance,
-                           'nodatas': nodatas},
-        ...,
-        }
+    Sort the source raster tiles in a single cell based on distance to center
+    then # of nodatas, overriding where indicated.
+    'cell' is a nested dictionary, the inner dictionaries of the master cells
+    dictionary, and is formatted thus:
+    {tile_rastername:
+        {'distance':x,
+         'nodatas':y,
+         'override':True/False}
+    }
 
-    returns a list of sorted chunks, with the outer key (chunk_rastername)
+    returns a list of sorted tiles, with the outer key (tile_rastername)
     being added to the inner dictionary as a value with the same name (so
-    there's now a list of dicts, rather than a nested dict)
+    there's now a list of dicts, rather than a nested dict):
+    [{'tile_rastername':x, 'distance':y, 'nodatas':z, 'override':a}, {...}, ...]
     '''
 
     #: First, convert nested dictionary to list of dictionaries while inserting
-    #: chunk_rastername as a value of the dictionary
-    chunk_list = []
-    for chunk_rastername in cell:
-        chunk_list.append({'chunk_rastername': chunk_rastername,
-                           'distance': cell[chunk_rastername]['distance'],
-                           'nodatas':cell[chunk_rastername]['nodatas']
-                           })
+    #: tile_rastername as a value of the dictionary
+    tile_list = []
+    for tile_rastername in cell:
+        tile_list.append({'tile_rastername': tile_rastername,
+                          'distance': cell[tile_rastername]['distance'],
+                          'nodatas':cell[tile_rastername]['nodatas'],
+                          'override':cell[tile_rastername]['override']
+                          })
 
-    #: sort the list of chunks based on distance
-    chunk_list.sort(key=lambda chunk_dict: chunk_dict['distance'])
+    #: First, sort out an override tile if present
+    #: Assumes there is only 1 or 0 override tiles (only takes the first 
+    #: override tile it finds)
+    tile_list.sort(key=lambda tile_dict: tile_dict['override'], reverse=True)
+    if tile_list[0]['override']:
+        sorted_list = tile_list[:1]
+        distance_list = tile_list[1:]
+    else:
+        sorted_list = []
+        distance_list = tile_list
 
-    #: Separate out the best chunk, sort remaining by nodatas
-    sorted_list = chunk_list[:1]
-    seconds_list = chunk_list[1:]
-    seconds_list.sort(key=lambda chunk_dict: chunk_dict['nodatas'])
+    #: Next, sort out the shortest distance
+    distance_list.sort(key=lambda tile_dict: tile_dict['distance'])
+    sorted_list.extend(distance_list[:1])
+    nodatas_list = distance_list[1:]
 
-    sorted_list.extend(seconds_list)
+    #: Finally, sort the remaining from least to most nodatas
+    nodatas_list.sort(key=lambda tile_dict: tile_dict['nodatas'])
+    sorted_list.extend(nodatas_list)
 
     return sorted_list
 
 
-if "__main__" in __name__:
-    directory = r'C:\gis\Projects\Sanborn\marriott_tif_resolution\Murray\1911'
-    poly_shp = r'C:\gis\Projects\Sanborn\marriott_tif_resolution\Murray\mosaic.shp'
-    tile_dir = r'C:\gis\Projects\Sanborn\marriott_tif_resolution\Murray\tiled'
-    csv_path = r'C:\gis\Projects\Sanborn\marriott_tif_resolution\Murray\mosaic.csv'
+def run(source_dir, output_dir, name, fishnet_size, cleanup=False, tile=True):
+    '''
+    Main logic; (eventually) all calls to other functions will come from this
+    function. Designed to either manually call with arguments or to be called
+    from an external file.
 
-    fishnet_size = 200
-    tile = True
+    source_dir:         A pathlib.Path object to a directory containing the
+                        rasters to be mosaiced.
+    output_dir:         A pathlib.Path object to the output directory for the
+                        mosaiced tif. Will also hold the temporary tiled
+                        directory, mosaic csv, and fishnet shapefile.
+    name:               The name for the output raster without any extension
+                        (ie, 'foo', not 'foo.tif'). Also used to name the
+                        temporary/intermediate data.
+    fishnet_size:       The size for each cell in map units.
+    cleanup:            If true, delete all temporary/intermediate data.
+    tile:               If true, source rasters will be tiled into a temporary
+                        directory within output_dir. If false, info required
+                        for sorting will be read from the fishnet shapefile
+                        created earlier.
+    '''
+
+    start = datetime.datetime.now()
+
+    #: Paths
+    poly_path = output_dir/f'{name}_mosaic.shp'
+    tile_path = output_dir/f'{name}_tiled'
+    csv_path = output_dir/f'{name}_mosaic.csv'
+    vrt_path = output_dir/f'{name}.vrt'
+    tif_path = output_dir/f'{name}.tif'
+    extents_path = output_dir/f'{name}_extents.shp'
+
+    print(f'\nMerging {source_dir} into {tif_path}\n')
 
     # Retile if needed; otherwise, just read the shapefile
     if tile:
-        all_cells = tile_rectified_rasters(directory, poly_shp, tile_dir, fishnet_size)
+        #: File path management
+        if not output_dir.exists():
+            output_dir.mkdir(parents=True)
+
+        if tile_path.exists():
+            print(f'Deleting existing tile directory {tile_path}...')
+            shutil.rmtree(tile_path)
+        tile_path.mkdir(parents=True)
+
+        files = []
+        #: Add all .tif related files, including .tif.xml and .tif.ovr
+        files.extend([tif for tif in output_dir.glob(f'{name}.tif*')])
+        #: Add CSV and all shapefile files
+        files.extend([shp for shp in output_dir.glob(f'{name}_mosaic.*')])
+        files.extend([shp for shp in output_dir.glob(f'{name}_extents.*')])
+        for file_path in files:
+            if file_path.exists():  #: 3.8 will allow unlink(missing_ok=True)
+                print(f'Deleting {file_path}...')
+                file_path.unlink()
+
+        print(f'\nTiling source rasters into {tile_path}...')
+        all_cells = generate_tiles_from_rasters(str(source_dir), str(extents_path), str(poly_path), str(tile_path), fishnet_size)
+
     else:
-        all_cells = read_chunk_from_shapefile(poly_shp)
+        #: Existing override cleanup
+        files = []
+        files.extend([f for f in output_dir.glob(f'{name}_overrides.*')])
+        files.extend([f for f in output_dir.glob(f'{name}_mosaic_overrides.*')])
+        for file_path in files:
+            if file_path.exists():  #: 3.8 will allow unlink(missing_ok=True)
+                print(f'Deleting {file_path}...')
+                file_path.unlink()
+
+        print(f'\nReading existing tiles from {poly_path}...')
+
+        csv_path = output_dir/f'{name}_mosaic_overrides.csv'
+        vrt_path = output_dir/f'{name}_overrides.vrt'
+        tif_path = output_dir/f'{name}_overrides.tif'
+        all_cells = read_tiles_from_shapefile(str(poly_path))
 
     #: Create list of sorted dictionaries. The dictionaries for each cell are
     #: flattened and then sorted by distance and then nodatas (first is always
     #: shortest distance, following are sorted by distance then nodatas)
-    all_chunks = []
+    print(f'\nSorting tiles...')
+    sorted_tiles = []
     for cell_index in all_cells:
-        cell_chunks = sort_chunks(all_cells[cell_index])
-        cell_chunks.reverse()  #: reverse so VRT adds most desirable chunks last
-        all_chunks.extend(cell_chunks)
+        cell_tiles = sort_tiles(all_cells[cell_index])
+        cell_tiles.reverse()  #: reverse so VRT adds most desirable chunks last
+        sorted_tiles.extend(cell_tiles)
 
     with open(csv_path, 'w', newline='') as csv_file:
         writer = csv.writer(csv_file)
-        for chunk in all_chunks:
-            chunk_name = chunk['chunk_rastername']
-            chunk_path = os.path.join(tile_dir, chunk_name)
-            writer.writerow([chunk_path])
+        for tile in sorted_tiles:
+            tile_name = tile['tile_rastername']
+            full_tile_path = tile_path/tile_name
+            writer.writerow([full_tile_path])
+
+    #: Build list of files for vrt
+    vrt_list = [str(tile_path/tile['tile_rastername']) for tile in sorted_tiles]
+    # vrt_options = gdal.BuildVRTOptions(resampleAlg='cubic')
+
+    #: Build VRT
+    print(f'\nBuilding {vrt_path}...')
+    vrt = gdal.BuildVRT(str(vrt_path), vrt_list, callback=gdal_progress_callback)
+    vrt = None
+
+    creation_opts = ['compress=jpeg', 'photometric=ycbcr', 'tiled=yes']
+
+    print(f'\nTranslating to {tif_path}...')
+    trans_opts = gdal.TranslateOptions(format='GTiff',
+                                       creationOptions=creation_opts,
+                                       outputType=gdal.GDT_Byte,
+                                       scaleParams=[],
+                                       callback=gdal_progress_callback)
+    dataset = gdal.Translate(str(tif_path), str(vrt_path), options=trans_opts)
+    dataset = None
+
+    print('\nBuilding overviews...')
+    #: Set options for compressed overviews
+    gdal.SetConfigOption('compress_overview', 'jpeg')
+    gdal.SetConfigOption('photometric_overview', 'ycbcr')
+    gdal.SetConfigOption('interleave_overview', 'pixel')
+
+    #: Opening read-only creates external overviews (.ovr file)
+    dataset = gdal.Open(str(tif_path), gdal.GA_ReadOnly)
+    dataset.BuildOverviews('cubic', [2, 4, 8, 16], gdal_progress_callback)
+    dataset = None
+
+    #: Cleanup our files after running
+    if cleanup:
+        print('\nCleaning up after ourselves...\n')
+        if tile_path.exists():
+            print(f'Deleting existing tile directory {tile_path}...')
+            shutil.rmtree(tile_path)
+
+        files = []
+        #: Add CSV and all shapefile files
+        files.extend([shp for shp in output_dir.glob(f'{name}_mosaic.*')])
+        files.extend([shp for shp in output_dir.glob(f'{name}_extents.*')])
+        for file_path in files:
+            if file_path.exists():  #: 3.8 will allow unlink(missing_ok=True)
+                print(f'Deleting {file_path}...')
+                file_path.unlink()
+
+        shpfiles_paths = output_dir.glob(f'{poly_path.stem}.*')
+
+        for file_path in [csv_path, vrt_path]:
+            if file_path.exists():
+                file_path.unlink()
+
+    end = datetime.datetime.now()
+
+    print(f'\n{tif_path} took {end-start} to complete.')
+
+
+if "__main__" in __name__:
+
+    cleanup = False  #: Set to False to keep temp files for troubleshooting
+    fishnet_size = 10  #: in map units
+    tile = True  #: Set to False to read data on existing tiles from shapefile
+
+    # years = [r'C:\gis\Projects\Sanborn\marriott_tif\Sandy\1898',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Sandy\1911',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Scofield\1924',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Spanish Fork\1890',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Spanish Fork\1908',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Spanish Fork\1925',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Spring City\1917',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Springville\1890',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Springville\1898',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Springville\1908',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Tooele\1910',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Tooele\1911',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Tooele\1931',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Vernal\1910',
+    #          r'C:\gis\Projects\Sanborn\marriott_tif\Vernal\1917'
+    #          ]
+
+    years = [r'c:\gis\projects\sanborn\marriott_tif\Salt Lake City\1950']
+
+    for city in years:
+
+        #: Paths
+        # year_dir = Path(r'C:\gis\Projects\Sanborn\marriott_tif\Green River\1917')
+        year_dir = Path(city)
+        output_root_dir = Path(r'F:\WasatchCo\sanborn2')
+
+        year = year_dir.name
+        city = year_dir.parent.name
+        output_dir = output_root_dir/city
+        filename = f'{city}{year}'
+
+        run(year_dir, output_dir, filename, fishnet_size, cleanup, tile=False)
