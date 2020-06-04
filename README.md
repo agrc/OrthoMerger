@@ -8,10 +8,10 @@ In brief, it slices all the source rasters into individual tiles conforming to a
 
 `orthomerger` works best with rasters of similar size that have overlapping data areas, such as an aerial imagery flight line. It does not work well for source rasters with irregular collars, like USGS topos with a larger collar area on bottom than top.
 
-`orthomerger` thinks in terms of "source rasters", "chunks", "tiles", and "mosaics"
+`orthomerger` thinks in terms of "source rasters", "chunks", "tiles", and "mosaics".
 
 **source raster:**
-    The initial rasters that will be mosaiced together. They should all live in the same directory and have a proper nodata value set. If working with 8-bit aerial imagery, it may be necessary to convert the source rasters into a 16-bit file and assign a nodata value prior to any warping/reprojecting.
+    The initial rasters that will be mosaiced together. They should all live in the same directory, have a 16-bit data type, and have a proper nodata value set. If working with 8-bit aerial imagery, it may be necessary to convert the source rasters into a 16-bit file and assign a nodata value prior to any warping/reprojecting.
 
 **chunk:**
     A single, specific area of the fishnet grid used to slice all of the source rasters into individual tiles. Each chunk has a row/col index. The output `_mosaic.shp` shapefile contains this fishnet grid, with coincident polygons for every source raster that covers a specific chunk.
